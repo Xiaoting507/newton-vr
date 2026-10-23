@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Newton VR</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: consola de laboratorio a pantalla completa — escena en vivo a la izquierda, rack de instrumentos a la derecha, gatillo de fuerza abajo */
+:root{
+  --bg:#0a1324; --panel:#0f1c33; --panel-2:#15274a; --line:#22385e; --fg:#e7eefb; --muted:#8ea3c6;
+  --accent:#4da3ff; --N:#3ddc84; --P:#ffb020; --F:#4da3ff; --f:#ff5d62;
+  --display:"Chakra Petch","Segoe UI",system-ui,sans-serif;
+  --body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 var(--body);overflow:hidden;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+#app{height:100%;display:grid;grid-template-rows:auto 1fr auto;grid-template-columns:minmax(0,1fr) 360px;
+  grid-template-areas:"top top" "scene side" "ctrl side";
+  padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));padding-block:10px;gap:10px}
+
+/* barra superior */
+.top{grid-area:top;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:10px;margin-right:auto}
+.brand b{font:700 22px/1 var(--display);letter-spacing:.06em}
+.brand b span{color:var(--F)}
+.brand small{color:var(--muted);font-size:13px}
+.status{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:13px}
+.chip{padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);white-space:nowrap}
+.chip.timer{font-size:18px;font-weight:600;min-width:92px;text-align:center}
+.chip.timer.warn{color:var(--f);border-color:var(--f)}
+.dots{display:flex;gap:5px}
+.dots i{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--muted)}
+.dots i.on{background:var(--F);border-color:var(--F)}
+.dots i.ok{background:var(--N);border-color:var(--N)}
+.iconbtn{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 11px;font-size:13px}
+.iconbtn:hover{border-color:var(--accent)}
+
+/* escena */
+.scene{grid-area:scene;position:relative;min-height:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
+#scene{position:absolute;inset:0;width:100%;height:100%;display:block}
+.formula{position:absolute;left:12px;right:12px;bottom:10px;font:500 13px/1.4 var(--mono);color:var(--fg);
+  background:rgba(10,19,36,.78);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-variant-numeric:tabular-nums}
+.formula .cF{color:var(--F)} .formula .cf{color:var(--f)} .formula .cN{color:var(--N)}
+.statepill{position:absolute;left:12px;top:12px;font:600 12px/1 var(--display);letter-spacing:.12em;padding:7px 11px;border-radius:999px;border:1px solid var(--line);background:rgba(10,19,36,.8)}
+.statepill.rest{color:var(--muted)} .statepill.hold{color:var(--P);border-color:var(--P)} .statepill.slide{color:var(--F);border-color:var(--F)}
+.flash{position:absolute;left:50%;top:50px;max-width:calc(100% - 24px);transform:translate(-50%,0);text-align:center;pointer-events:none;
+  background:rgba(255,93,98,.13);border:1.5px solid var(--f);border-radius:12px;padding:12px 22px;backdrop-filter:blur(3px)}
+.flash b{display:block;font:700 clamp(18px,2.6vw,30px)/1.1 var(--display);letter-spacing:.04em;color:var(--f)}
+.flash span{font:500 13px/1.4 var(--mono);color:var(--fg)}
+.flash.show{animation:pop 2.4s ease forwards}
+@keyframes pop{0%{opacity:0;transform:translate(-50%,10px) scale(.9)}10%{opacity:1;transform:translate(-50%,0) scale(1.04)}18%{transform:translate(-50%,0) scale(1)}80%{opacity:1}100%{opacity:0}}
+
+/* panel lateral */
+.side{grid-area:side;display:flex;flex-direction:column;gap:10px;min-height:0;overflow:auto}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.box h3{margin:0 0 8px;font:600 12px/1 var(--display);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.read{display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;align-items:center;font-family:var(--mono);font-size:14px;font-variant-numeric:tabular-nums}
+.read .sw{width:10px;height:10px;border-radius:2px}
+.read .k{color:var(--muted);font-family:var(--body);font-size:13px}
+.read .v{text-align:right;font-weight:600}
+.read hr{grid-column:1/-1;border:0;border-top:1px solid var(--line);margin:4px 0;width:100%}
+.coef{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.coef span{font:500 12px/1 var(--mono);padding:5px 7px;border-radius:5px;background:var(--panel-2)}
+#graph{width:100%;aspect-ratio:4/3;display:block;max-width:100%}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--muted);margin-top:6px;flex-wrap:wrap}
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:5px;background:var(--f)}
+.legend i.th{background:none;border-top:2px dashed var(--muted);height:0}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.seg button{background:var(--panel-2);border:1px solid var(--line);border-radius:7px;padding:8px 4px;font-size:13px}
+.seg button.on{border-color:var(--F);background:rgba(77,163,255,.16);color:#fff}
+.seg button small{display:block;color:var(--muted);font:11px var(--mono)}
+.lbl{font-size:12px;color:var(--muted);margin:10px 0 6px}
+.chk{display:flex;gap:8px;align-items:center;font-size:13px;margin-top:10px}
+.objective{font-size:14px}
+.objective b{color:var(--N)}
+
+/* control de fuerza */
+.ctrl{grid-area:ctrl;display:flex;gap:10px;align-items:stretch}
+.meter{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;touch-action:none;user-select:none;cursor:ew-resize}
+.meter .row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
+.meter .row b{font:600 12px/1 var(--display);letter-spacing:.14em;color:var(--muted)}
+.meter .row .mono{font-size:20px;font-weight:600;color:var(--F)}
+.track{position:relative;height:26px;border-radius:6px;background:var(--panel-2);overflow:visible}
+.fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:linear-gradient(90deg,#2a6fd0,var(--F));width:0}
+.fill.over{box-shadow:0 0 18px rgba(77,163,255,.7)}
+.mark{position:absolute;top:-5px;bottom:-5px;width:2px}
+.mark.s{background:var(--f)} .mark.k{background:repeating-linear-gradient(var(--f) 0 4px,transparent 4px 7px)}
+.mark em{position:absolute;top:-17px;left:50%;transform:translateX(-50%);font:500 10px/1 var(--mono);color:var(--f);font-style:normal;white-space:nowrap}
+.mark.k em{top:auto;bottom:-15px}
+.scale{display:flex;justify-content:space-between;font:11px var(--mono);color:var(--muted);margin-top:22px}
+.push{width:190px;border:0;border-radius:10px;background:var(--F);color:#04122a;font:700 18px/1.1 var(--display);letter-spacing:.08em;touch-action:none;user-select:none;-webkit-user-select:none}
+.push small{display:block;font:500 11px/1.3 var(--body);letter-spacing:0;opacity:.8;margin-top:4px}
+.push.active{background:#8cc4ff;transform:scale(.98)}
+
+/* pantallas superpuestas */
+.overlay{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:rgba(6,12,24,.72);backdrop-filter:blur(6px);
+  padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));overflow:auto}
+.card{width:min(760px,100%);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:clamp(18px,3vw,32px);box-shadow:0 30px 80px rgba(0,0,0,.5)}
+.card h2{margin:0 0 6px;font:700 clamp(24px,3.4vw,36px)/1.05 var(--display);letter-spacing:.03em;text-wrap:balance}
+.card p{margin:0 0 12px;color:var(--muted);max-width:62ch}
+.eyebrow{font:600 12px/1 var(--display);letter-spacing:.18em;color:var(--F);text-transform:uppercase;margin-bottom:10px}
+.hero-title{font:700 clamp(46px,8vw,92px)/.9 var(--display);letter-spacing:.04em;margin:0}
+.hero-title span{color:var(--F)}
+.hero-q{font:500 clamp(18px,2.4vw,24px)/1.2 var(--display);margin:10px 0 18px;color:var(--fg)}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 20px;padding:0;list-style:none;counter-reset:s}
+.steps li{counter-increment:s;background:var(--panel-2);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--fg)}
+.steps li::before{content:counter(s);display:block;font:700 18px/1 var(--display);color:var(--F);margin-bottom:4px}
+.modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.mode{text-align:left;background:var(--panel-2);border:1.5px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:4px}
+.mode:hover,.mode:focus-visible{border-color:var(--F)}
+.mode b{font:700 20px/1.1 var(--display)}
+.mode span{font-size:13px;color:var(--muted)}
+.mode.primary{border-color:var(--F);background:rgba(77,163,255,.14)}
+.menu-foot{display:flex;justify-content:space-between;gap:16px;margin-top:20px;flex-wrap:wrap;align-items:flex-start}
+.mini-board{flex:1;min-width:220px}
+.mini-board h4,.card h4{margin:0 0 6px;font:600 12px/1 var(--display);letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
+ol.board{margin:0;padding:0;list-style:none;display:grid;gap:3px;font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums}
+ol.board li{display:grid;grid-template-columns:26px 1fr auto auto;gap:10px;padding:5px 8px;border-radius:5px;background:var(--panel-2)}
+ol.board li.me{outline:1.5px solid var(--N)}
+ol.board .r{color:var(--P)} ol.board .t{color:var(--muted)}
+.empty{font-size:13px;color:var(--muted)}
+.keys{font-size:12px;color:var(--muted)}
+kbd{font:500 11px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;color:var(--fg)}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.btn{border:1.5px solid var(--line);background:var(--panel-2);border-radius:8px;padding:11px 18px;font:600 15px/1 var(--display);letter-spacing:.05em}
+.btn:hover{border-color:var(--accent)}
+.btn.go{background:var(--F);border-color:var(--F);color:#04122a}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:14px 0}
+.stat{background:var(--panel-2);border-radius:8px;padding:10px}
+.stat small{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.stat b{font:600 18px/1.3 var(--mono);font-variant-numeric:tabular-nums}
+.res-title.ok{color:var(--N)} .res-title.bad{color:var(--f)}
+.stars{font:700 30px/1 var(--display);letter-spacing:.2em;color:var(--P)}
+.stars .off{color:var(--line)}
+.lesson{background:rgba(77,163,255,.1);border:1px solid rgba(77,163,255,.35);border-radius:8px;padding:10px 12px;font-size:14px;color:var(--fg)}
+.lvl-spec{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}
+.field{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.field input{flex:1;min-width:180px;background:var(--panel-2);border:1.5px solid var(--line);border-radius:8px;padding:11px 12px;color:var(--fg);font:600 16px var(--mono)}
+.q-opts{display:grid;gap:8px;margin-top:12px}
+.q-opt{text-align:left;background:var(--panel-2);border:1.5px solid var(--line);border-radius:8px;padding:12px 14px;font-size:15px}
+.q-opt:hover:not(:disabled){border-color:var(--F)}
+.q-opt.right{border-color:var(--N);background:rgba(61,220,132,.14)}
+.q-opt.wrong{border-color:var(--f);background:rgba(255,93,98,.12)}
+.q-opt:disabled{cursor:default}
+.q-progress{display:flex;gap:4px;margin-bottom:14px}
+.q-progress i{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.q-progress i.done{background:var(--F)}
+.q-exp{margin-top:12px}
+
+@media (max-width:900px){
+  body{overflow:auto}
+  #app{height:auto;min-height:100%;grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "scene" "ctrl" "side"}
+  .scene{height:min(56vh,440px)}
+  .push{width:130px;font-size:15px}
+  .side{overflow:visible}
+  .steps,.modes{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .brand small{display:none}
+}
+@media (max-width:520px){
+  .ctrl{flex-direction:column}
+  .push{width:100%;padding:16px}
+  .formula{font-size:11px}
+  .lvl-spec{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){.flash.show{animation:none;opacity:1}}
+</style>
+
+<div id="app">
+  <header class="top">
+    <div class="brand"><b>NEWTON <span>VR</span></b><small>¿Qué fuerza necesito?</small></div>
+    <div class="status">
+      <span class="chip" id="modeLabel">Menú</span>
+      <span class="dots" id="dots" hidden><i></i><i></i><i></i></span>
+      <span class="chip timer" id="timer" hidden>15,0 s</span>
+    </div>
+    <button class="iconbtn" id="btnSound" type="button" aria-pressed="true">Sonido: sí</button>
+    <button class="iconbtn" id="btnFull" type="button">Pantalla completa</button>
+    <button class="iconbtn" id="btnMenu" type="button">Menú</button>
+  </header>
+
+  <section class="scene" aria-label="Escena: caja sobre la superficie">
+    <canvas id="scene"></canvas>
+    <div class="statepill rest" id="statePill">EN REPOSO</div>
+    <div class="flash" id="flash" hidden><b>¡SE ROMPIÓ LA FRICCIÓN ESTÁTICA!</b><span id="flashSub"></span></div>
+    <div class="formula" id="formula"></div>
+  </section>
+
+  <aside class="side">
+    <div class="box">
+      <h3>Diagrama de cuerpo libre</h3>
+      <div class="read">
+        <i class="sw" style="background:var(--F)"></i><span class="k">F aplicada</span><span class="v" id="rF">0,0 N</span>
+        <i class="sw" style="background:var(--f)"></i><span class="k" id="rfLabel">f fricción</span><span class="v" id="rf">0,0 N</span>
+        <i class="sw" style="background:var(--N)"></i><span class="k">N normal</span><span class="v" id="rN">0,0 N</span>
+        <i class="sw" style="background:var(--P)"></i><span class="k">P = mg peso</span><span class="v" id="rP">0,0 N</span>
+        <hr>
+        <i></i><span class="k">F neta</span><span class="v" id="rFn">0,0 N</span>
+        <i></i><span class="k">a aceleración</span><span class="v" id="ra">0,00 m/s²</span>
+        <i></i><span class="k">v velocidad</span><span class="v" id="rv">0,00 m/s</span>
+        <i></i><span class="k">x posición</span><span class="v" id="rx">0,00 m</span>
+        <i></i><span class="k">m masa</span><span class="v" id="rm">10 kg</span>
+      </div>
+      <div class="coef" id="coef"></div>
+    </div>
+
+    <div class="box">
+      <h3>Fricción vs. fuerza aplicada</h3>
+      <canvas id="graph"></canvas>
+      <div class="legend"><span><i></i>tu medición en vivo</span><span><i class="th"></i>modelo teórico</span></div>
+    </div>
+
+    <div class="box" id="exploreCtl" hidden>
+      <h3>Laboratorio</h3>
+      <div class="lbl">Superficie</div>
+      <div class="seg" id="segSurf">
+        <button type="button" data-surf="ice">Hielo<small>μs 0,10 · μk 0,05</small></button>
+        <button type="button" data-surf="wood">Madera<small>μs 0,50 · μk 0,30</small></button>
+        <button type="button" data-surf="rough">Rugosa<small>μs 0,90 · μk 0,70</small></button>
+      </div>
+      <div class="lbl">Masa de la caja</div>
+      <div class="seg" id="segMass">
+        <button type="button" data-m="5">5 kg</button>
+        <button type="button" data-m="10">10 kg</button>
+        <button type="button" data-m="15">15 kg</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="chkPredict" checked> Mostrar dónde frenaría si suelto</label>
+      <div class="actions"><button class="btn" type="button" id="btnReset">Reiniciar caja <kbd>R</kbd></button></div>
+    </div>
+
+    <div class="box" id="challengeCtl" hidden>
+      <h3>Objetivo</h3>
+      <div class="objective" id="objective"></div>
+    </div>
+  </aside>
+
+  <footer class="ctrl">
+    <div class="meter" id="meter" aria-label="Arrastra para fijar la fuerza aplicada">
+      <div class="row"><b>FUERZA APLICADA · GATILLO</b><span class="mono" id="fVal">0,0 N</span></div>
+      <div class="track" id="track">
+        <div class="fill" id="fill"></div>
+        <div class="mark s" id="markS"><em>μsN</em></div>
+        <div class="mark k" id="markK"><em>μkN</em></div>
+      </div>
+      <div class="scale"><span>0</span><span>30</span><span>60</span><span>90</span><span>120</span><span>150 N</span></div>
+    </div>
+    <button class="push" id="btnPush" type="button">EMPUJAR<small>Mantén presionado · <kbd>Espacio</kbd></small></button>
+  </footer>
+</div>
+
+<!-- MENÚ -->
+<div class="overlay" id="ovMenu">
+  <div class="card">
+    <div class="eyebrow">Gala Tecnológica · Física</div>
+    <h1 class="hero-title">NEWTON <span>VR</span></h1>
+    <div class="hero-q">¿Qué fuerza necesitas para mover la caja?</div>
+    <ol class="steps">
+      <li>Mantén <b>EMPUJAR</b> (o <kbd>Espacio</kbd>, o el gatillo del control) y la fuerza sube poco a poco.</li>
+      <li>Mira el DCL: la fricción estática aguanta hasta μsN y luego se rompe.</li>
+      <li>Suelta a tiempo: la fricción cinética frena la caja. ¡Detenla en la meta!</li>
+    </ol>
+    <div class="modes">
+      <button class="mode primary" type="button" id="goChallenge"><b>Desafío</b><span>3 niveles, 15 s cada uno. Detén la caja dentro de la zona verde.</span></button>
+      <button class="mode" type="button" id="goExplore"><b>Explorar</b><span>Sin tiempo. Cambia superficie y masa y experimenta.</span></button>
+      <button class="mode" type="button" id="goQuiz"><b>Cuestionario</b><span>6 preguntas antes o después de jugar.</span></button>
+    </div>
+    <div class="menu-foot">
+      <div class="mini-board"><h4>Mejores puntajes</h4><div id="menuBoard"></div></div>
+      <div class="keys">Teclas: <kbd>Espacio</kbd> empujar · <kbd>R</kbd> reiniciar · <kbd>Esc</kbd> menú<br>Compatible con mando: gatillo derecho (RT/R2).<br><span id="padState">Ningún mando detectado</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- INTRO DE NIVEL -->
+<div class="overlay" id="ovIntro" hidden>
+  <div class="card">
+    <div class="eyebrow" id="inEyebrow">Nivel 1 de 3</div>
+    <h2 id="inTitle">Madera</h2>
+    <p id="inText"></p>
+    <div class="lvl-spec" id="inSpec"></div>
+    <div class="lesson" id="inTip"></div>
+    <div class="actions"><button class="btn go" type="button" id="btnBegin">¡Empezar!</button><button class="btn" type="button" data-menu>Menú</button></div>
+  </div>
+</div>
+
+<!-- RESULTADO -->
+<div class="overlay" id="ovResult" hidden>
+  <div class="card">
+    <div class="eyebrow" id="resEyebrow">Nivel 1 · Madera</div>
+    <h2 class="res-title" id="resTitle">¡DESAFÍO COMPLETADO!</h2>
+    <p id="resWhy"></p>
+    <div class="stars" id="resStars"></div>
+    <div class="stats" id="resStats"></div>
+    <div class="lesson" id="resLesson"></div>
+    <div class="actions" id="resActions"></div>
+  </div>
+</div>
+
+<!-- NOMBRE PARA EL MARCADOR -->
+<div class="overlay" id="ovName" hidden>
+  <div class="card">
+    <div class="eyebrow">¡Completaste los 3 niveles!</div>
+    <h2>Puntaje total: <span class="mono" id="nmScore">0</span></h2>
+    <p id="nmText"></p>
+    <form id="nameForm">
+      <label for="nameInput" class="lbl">Tu nombre para el marcador</label>
+      <div class="field"><input id="nameInput" maxlength="16" autocomplete="off" placeholder="Ej.: Sofía 11B" required><button class="btn go" type="submit">Guardar</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- MARCADOR -->
+<div class="overlay" id="ovBoard" hidden>
+  <div class="card">
+    <div class="eyebrow">Marcador de la feria</div>
+    <h2>Mejores puntajes</h2>
+    <div id="fullBoard"></div>
+    <div class="actions"><button class="btn go" type="button" id="btnAgain">Jugar otra vez</button><button class="btn" type="button" data-menu>Menú</button><button class="btn" type="button" id="btnClearBoard">Borrar marcador</button></div>
+  </div>
+</div>
+
+<!-- CUESTIONARIO -->
+<div class="overlay" id="ovQuiz" hidden>
+  <div class="card" id="quizCard"></div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const G = 9.8, FMAX = 150, TL = 15, ZONE = [6, 7], WALL = 9, RAMP = 45, DT = 1/120;
+const SURF = {
+  ice:   { name:'Hielo',  muS:.10, muK:.05, col:'#bfe4ff' },
+  wood:  { name:'Madera', muS:.50, muK:.30, col:'#9a6438' },
+  rough: { name:'Rugosa', muS:.90, muK:.70, col:'#5d636e' }
+};
+const LEVELS = [
+  { s:'wood',  m:10, think:'Introducción: pasa el umbral de fricción y frena con criterio.',
+    tip:'Sube la fuerza hasta que la caja arranque (49 N) y suelta pronto: la fricción cinética la frena a 2,94 m/s².' },
+  { s:'ice',   m:10, think:'Casi no hay fricción: hay que soltar mucho antes para no pasarse.',
+    tip:'En hielo arranca con solo 9,8 N y frena a 0,49 m/s². Un empujón corto basta; si te pasas, no hay vuelta atrás.' },
+  { s:'rough', m:15, think:'Se necesita fuerza alta para arrancar y la caja frena de golpe.',
+    tip:'Necesitas más de 132,3 N para arrancar y frena a 6,86 m/s². Mantén el empuje más tiempo y suelta cerca de la meta.' }
+];
+const fmt = (n, d=1) => (Math.abs(n) < 0.5*Math.pow(10,-d) ? 0 : n).toFixed(d).replace('.', ',').replace('-', '−');
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+
+/* ---------- estado ---------- */
+const S = { mode:'menu', surf:'wood', m:10, x:0, v:0, a:0, F:0, f:0, sliding:false,
+  t:0, started:false, moved:false, playing:false, restT:0, Fpeak:0, apeak:0, vRelease:0,
+  level:0, run:null, pts:[], parts:[], sampleT:0, camX:-0.8, shake:0, demoT:0, wallHit:false };
+const input = { hold:false, ramp:0, drag:null, pad:0 };
+
+function params(){
+  const s = SURF[S.surf], N = S.m * G;
+  return { s, N, P:N, fsMax:s.muS*N, fk:s.muK*N };
+}
+function boxSide(){ return 0.5 + S.m * 0.025; }
+
+function resetBox(){
+  Object.assign(S, { x:0, v:0, a:0, F:0, f:0, sliding:false, t:0, started:false, moved:false, restT:0,
+    Fpeak:0, apeak:0, pts:[], parts:[], camX:-0.8, wallHit:false });
+  input.ramp = 0; input.drag = null; input.hold = false;
+  updateCoef(); updateMarks();
+}
+
+/* ---------- física (modelo de la propuesta, movimiento 1D) ---------- */
+let wasSliding = false;
+function physStep(dt){
+  const { fsMax, fk } = params();
+  const F = S.F;
+  if (S.v < 0.001) {
+    S.v = 0;
+    if (F <= fsMax) { S.f = F; S.a = 0; S.sliding = false; }
+    else { S.f = fk; S.a = (F - fk) / S.m; S.sliding = true; }
+  } else { S.f = fk; S.a = (F - fk) / S.m; S.sliding = true; }
+  if (S.sliding && !wasSliding && S.v === 0) onBreak(fsMax, fk);
+  wasSliding = S.sliding;
+  S.v = Math.max(0, S.v + S.a * dt);
+  S.x += S.v * dt;
+  S.Fpeak = Math.max(S.Fpeak, F);
+  S.apeak = Math.max(S.apeak, S.a);
+  if (S.mode === 'challenge') {
+    const lim = WALL - boxSide()/2;
+    if (S.x >= lim) { if (!S.wallHit) S.shake = 10; S.x = lim; S.v = 0; S.wallHit = true; }
+  }
+}
+
+function onBreak(fsMax, fk){
+  if (S.mode === 'menu') return;
+  const fl = $('#flash');
+  $('#flashSub').textContent = `F superó μsN = ${fmt(fsMax)} N · ahora f = μkN = ${fmt(fk)} N`;
+  fl.hidden = false; fl.classList.remove('show'); void fl.offsetWidth; fl.classList.add('show');
+  sfx.crack();
+}
+
+/* ---------- entrada ---------- */
+function readForce(dt){
+  if (S.mode === 'menu') {             // demostración automática detrás del menú
+    S.demoT += dt;
+    const c = S.demoT % 5.5;
+    return c < 2.2 ? c / 2.2 * params().fsMax * 1.35 : 0;
+  }
+  if (S.mode === 'challenge' && !S.playing) return 0;
+  if (S.mode === 'quiz') return 0;
+  input.ramp = input.hold ? Math.min(FMAX, input.ramp + RAMP*dt) : 0;
+  return clamp(Math.max(input.ramp, input.drag ?? 0, input.pad * FMAX), 0, FMAX);
+}
+
+function pollPad(){
+  input.pad = 0;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let name = '';
+  for (const p of pads) {
+    if (!p) continue;
+    name = p.id;
+    const rt = p.buttons[7] ? p.buttons[7].value : 0;
+    const a0 = p.buttons[0] && p.buttons[0].pressed ? 1 : 0;
+    input.pad = Math.max(input.pad, rt);
+    if (a0 && !pollPad.prevA) padConfirm();
+    pollPad.prevA = a0;
+  }
+  const el = $('#padState');
+  const txt = name ? 'Mando conectado: gatillo derecho = fuerza' : 'Ningún mando detectado';
+  if (el.textContent !== txt) el.textContent = txt;
+}
+function padConfirm(){
+  const btn = document.querySelector('.overlay:not([hidden]) .btn.go, .overlay:not([hidden]) .mode.primary');
+  if (btn) btn.click();
+}
+
+const meter = $('#meter'), track = $('#track');
+function dragAt(e){
+  const r = track.getBoundingClientRect();
+  input.drag = clamp((e.clientX - r.left) / r.width, 0, 1) * FMAX;
+}
+meter.addEventListener('pointerdown', e => { audioOn(); meter.setPointerCapture(e.pointerId); dragAt(e); });
+meter.addEventListener('pointermove', e => { if (input.drag !== null) dragAt(e); });
+const endDrag = () => { input.drag = null; };
+meter.addEventListener('pointerup', endDrag); meter.addEventListener('pointercancel', endDrag);
+
+const push = $('#btnPush');
+push.addEventListener('pointerdown', e => { audioOn(); push.setPointerCapture(e.pointerId); input.hold = true; push.classList.add('active'); });
+const endPush = () => { input.hold = false; push.classList.remove('active'); };
+push.addEventListener('pointerup', endPush); push.addEventListener('pointercancel', endPush);
+push.addEventListener('contextmenu', e => e.preventDefault());
+
+const anyOverlay = () => !!document.querySelector('.overlay:not([hidden])');
+addEventListener('keydown', e => {
+  audioOn();
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'Escape') { goMenu(); return; }
+  if (anyOverlay()) return;
+  if (e.code === 'Space' || e.key === 'ArrowUp' || e.key === 'w') { e.preventDefault(); document.activeElement?.blur?.(); input.hold = true; push.classList.add('active'); }
+  if ((e.key === 'r' || e.key === 'R') && S.mode === 'explore') resetBox();
+  if ((e.key === 'r' || e.key === 'R') && S.mode === 'challenge') loadLevel(S.level);
+});
+addEventListener('keyup', e => {
+  if (e.code === 'Space' || e.key === 'ArrowUp' || e.key === 'w') { if (e.target.tagName !== 'INPUT' && !anyOverlay()) e.preventDefault(); endPush(); }
+});
+addEventListener('blur', endPush);
+
+/* ---------- sonido (sintetizado, sin archivos) ---------- */
+let AC = null, muted = false, scrapeGain = null, scrapeFilter = null;
+function audioOn(){
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  try {
+    AC = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random()*2 - 1;
+    const src = AC.createBufferSource(); src.buffer = buf; src.loop = true;
+    scrapeFilter = AC.createBiquadFilter(); scrapeFilter.type = 'bandpass'; scrapeFilter.Q.value = 1.2;
+    scrapeGain = AC.createGain(); scrapeGain.gain.value = 0;
+    src.connect(scrapeFilter).connect(scrapeGain).connect(AC.destination); src.start();
+    sfx.noise = buf;
+  } catch (err) { AC = null; }
+}
+function tone(freq, dur, type='sine', vol=.15, when=0, slide=0){
+  if (!AC || muted) return;
+  const t0 = AC.currentTime + when, o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (slide) o.frequency.exponentialRampToValueAtTime(slide, t0 + dur);
+  g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(AC.destination); o.start(t0); o.stop(t0 + dur + .02);
+}
+const sfx = {
+  noise:null,
+  crack(){
+    tone(180, .35, 'triangle', .3, 0, 60);
+    if (!AC || muted || !this.noise) return;
+    const s = AC.createBufferSource(), g = AC.createGain(), f = AC.createBiquadFilter();
+    s.buffer = this.noise; f.type = 'highpass'; f.frequency.value = 1500;
+    g.gain.setValueAtTime(.35, AC.currentTime); g.gain.exponentialRampToValueAtTime(.0001, AC.currentTime + .18);
+    s.connect(f).connect(g).connect(AC.destination); s.start(); s.stop(AC.currentTime + .2);
+  },
+  win(){ [523,659,784,1047].forEach((f,i) => tone(f, .28, 'square', .07, i*.11)); },
+  fail(){ [392,311,233].forEach((f,i) => tone(f, .32, 'sawtooth', .06, i*.16)); },
+  tick(){ tone(1180, .06, 'square', .05); },
+  click(){ tone(660, .05, 'triangle', .08); },
+  right(){ tone(784, .12, 'triangle', .12); tone(1175, .18, 'triangle', .1, .09); },
+  wrong(){ tone(220, .25, 'sawtooth', .07); }
+};
+function updateScrape(){
+  if (!scrapeGain) return;
+  const freq = { ice:3200, wood:900, rough:420 }[S.surf];
+  scrapeFilter.frequency.setTargetAtTime(freq, AC.currentTime, .05);
+  const target = muted || S.mode === 'menu' ? 0 : Math.min(.22, S.v * .07 * (S.surf === 'ice' ? .5 : 1));
+  scrapeGain.gain.setTargetAtTime(target, AC.currentTime, .04);
+}
+$('#btnSound').addEventListener('click', e => {
+  audioOn(); muted = !muted;
+  e.currentTarget.textContent = 'Sonido: ' + (muted ? 'no' : 'sí');
+  e.currentTarget.setAttribute('aria-pressed', String(!muted));
+});
+$('#btnFull').addEventListener('click', () => {
+  try {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else { const p = document.documentElement.requestFullscreen?.(); p && p.catch(() => {}); }
+  } catch (err) {}
+});
+
+/* ---------- pantallas ---------- */
+const OVS = ['#ovMenu','#ovIntro','#ovResult','#ovName','#ovBoard','#ovQuiz'];
+function show(id){ OVS.forEach(o => $(o).hidden = (o !== id)); const b = $(id)?.querySelector('.btn.go,.mode.primary,input'); b && setTimeout(() => b.focus(), 30); }
+function closeOverlays(){ OVS.forEach(o => $(o).hidden = true); }
+document.addEventListener('click', e => { if (e.target.closest('[data-menu]')) goMenu(); });
+$('#btnMenu').addEventListener('click', goMenu);
+
+function setChrome(){
+  const ch = S.mode === 'challenge';
+  $('#exploreCtl').hidden = S.mode !== 'explore';
+  $('#challengeCtl').hidden = !ch;
+  $('#dots').hidden = !ch; $('#timer').hidden = !ch;
+  $('#modeLabel').textContent = { menu:'Menú', explore:'Modo Explorar', challenge:'Modo Desafío', quiz:'Cuestionario' }[S.mode];
+  document.querySelectorAll('#segSurf button').forEach(b => b.classList.toggle('on', b.dataset.surf === S.surf));
+  document.querySelectorAll('#segMass button').forEach(b => b.classList.toggle('on', +b.dataset.m === S.m));
+}
+
+function goMenu(){
+  S.mode = 'menu'; S.surf = 'wood'; S.m = 10; S.playing = false; S.demoT = 0;
+  resetBox(); setChrome(); renderBoard($('#menuBoard'), 5); show('#ovMenu');
+}
+function startExplore(){ S.mode = 'explore'; resetBox(); setChrome(); closeOverlays(); sfx.click(); }
+$('#goExplore').addEventListener('click', startExplore);
+$('#segSurf').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.surf = b.dataset.surf; resetBox(); setChrome(); sfx.click(); });
+$('#segMass').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.m = +b.dataset.m; resetBox(); setChrome(); sfx.click(); });
+$('#btnReset').addEventListener('click', resetBox);
+
+/* ---------- desafío ---------- */
+function startChallenge(){ S.mode = 'challenge'; S.run = { scores:[], times:[] }; sfx.click(); loadLevel(0); }
+$('#goChallenge').addEventListener('click', startChallenge);
+$('#btnAgain').addEventListener('click', startChallenge);
+
+function loadLevel(i){
+  const L = LEVELS[i];
+  S.level = i; S.surf = L.s; S.m = L.m; S.playing = false;
+  resetBox(); setChrome(); updateDots();
+  const { fsMax, fk, s } = params();
+  $('#inEyebrow').textContent = `Nivel ${i+1} de 3`;
+  $('#inTitle').textContent = `${s.name} · ${L.m} kg`;
+  $('#inText').textContent = L.think + ' Lleva la caja 6 m y detenla dentro de la zona verde de 1 m antes de 15 s.';
+  $('#inSpec').innerHTML = statHTML('Para arrancar (μsN)', fmt(fsMax)+' N') + statHTML('Fricción cinética (μkN)', fmt(fk)+' N') + statHTML('Frenado al soltar', fmt(s.muK*G,2)+' m/s²');
+  $('#inTip').textContent = L.tip;
+  $('#objective').innerHTML = `Nivel ${i+1}: <b>detén la caja entre 6 y 7 m</b> antes de 15 s.<br><span style="color:var(--muted);font-size:13px">${L.think}</span>`;
+  show('#ovIntro');
+}
+$('#btnBegin').addEventListener('click', () => { closeOverlays(); S.playing = true; sfx.click(); });
+
+function updateDots(){
+  const ds = document.querySelectorAll('#dots i');
+  ds.forEach((d, i) => { d.className = i < (S.run?.scores.length || 0) ? 'ok' : (i === S.level ? 'on' : ''); });
+}
+const statHTML = (k, v) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`;
+
+let lastTick = 99;
+function challengeTick(dt){
+  if (!S.playing) return;
+  if (!S.started && S.F > 0) S.started = true;
+  if (S.started) S.t += dt;
+  const left = Math.max(0, TL - S.t);
+  const sec = Math.ceil(left);
+  if (sec <= 5 && sec < lastTick && S.started) sfx.tick();
+  lastTick = sec;
+  if (S.x > 0.05) S.moved = true;
+  if (S.moved && S.v === 0 && !S.sliding) S.restT += dt; else S.restT = 0;
+  if (S.wallHit) return endLevel(false, 'La caja chocó con el final de la pista. Suelta el gatillo antes: la fricción cinética necesita distancia para frenar.');
+  if (S.restT > 0.35) {
+    if (S.x >= ZONE[0] && S.x <= ZONE[1]) return endLevel(true);
+    if (S.x > ZONE[1]) return endLevel(false, `Te pasaste: la caja se detuvo en ${fmt(S.x,2)} m. Suelta un poco antes.`);
+  }
+  if (S.t >= TL) return endLevel(false, S.x < ZONE[0] ? `Se acabó el tiempo con la caja en ${fmt(S.x,2)} m. Empuja con más decisión.` : 'Se acabó el tiempo antes de que la caja se detuviera.');
+}
+
+function endLevel(ok, why=''){
+  S.playing = false; endPush(); input.drag = null;
+  const { fsMax, fk, s } = params();
+  const L = LEVELS[S.level];
+  let score = 0, stars = 0;
+  if (ok) {
+    const prec = 1 - Math.abs(S.x - 6.5) / 0.5;
+    stars = prec > .7 ? 3 : prec > .35 ? 2 : 1;
+    score = Math.round(1000 + (TL - S.t) * 40 + prec * 500);
+    S.run.scores.push(score); S.run.times.push(S.t);
+    sfx.win();
+  } else sfx.fail();
+  updateDots();
+  setTimeout(() => {
+    $('#resEyebrow').textContent = `Nivel ${S.level+1} · ${s.name} · ${S.m} kg`;
+    const t = $('#resTitle');
+    t.textContent = ok ? '¡DESAFÍO COMPLETADO!' : 'INTÉNTALO DE NUEVO';
+    t.className = 'res-title ' + (ok ? 'ok' : 'bad');
+    $('#resWhy').textContent = ok ? `La caja se detuvo en ${fmt(S.x,2)} m, a ${fmt(Math.abs(S.x-6.5)*100,0)} cm del centro de la meta. Puntaje del nivel: ${score}.` : why;
+    $('#resStars').innerHTML = ok ? '★'.repeat(stars) + `<span class="off">${'★'.repeat(3-stars)}</span>` : '';
+    $('#resStats').innerHTML =
+      statHTML('F máx. aplicada', fmt(S.Fpeak)+' N') + statHTML('Fricción est. máx.', fmt(fsMax)+' N') +
+      statHTML('Fricción cinética', fmt(fk)+' N') + statHTML('a máx.', fmt(S.apeak,2)+' m/s²') +
+      statHTML('Masa', S.m+' kg') + statHTML('Superficie', s.name) +
+      statHTML('Tiempo', fmt(S.t)+' s') + statHTML('Posición final', fmt(S.x,2)+' m');
+    const decel = s.muK * G;
+    $('#resLesson').innerHTML = `<b>La física:</b> al soltar, solo actúa f = μkN = ${fmt(fk)} N, así que la caja frena con a = μk·g = ${fmt(decel,2)} m/s². ` +
+      `Si sueltas con velocidad v, recorre d = v² / (2·μk·g) más. Con v = 2 m/s serían ${fmt(4/(2*decel),2)} m.`;
+    const acts = $('#resActions'); acts.innerHTML = '';
+    const mk = (txt, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ' + cls; b.textContent = txt; b.onclick = fn; acts.append(b); };
+    if (ok && S.level < 2) mk('Siguiente nivel', 'go', () => loadLevel(S.level + 1));
+    if (ok && S.level === 2) mk('Ver puntaje total', 'go', askName);
+    mk(ok ? 'Repetir nivel' : 'Reintentar', ok ? '' : 'go', () => { if (ok) { S.run.scores.pop(); S.run.times.pop(); } loadLevel(S.level); });
+    mk('Menú', '', goMenu);
+    show('#ovResult');
+  }, 650);
+}
+
+/* ---------- marcador (guardado en este navegador) ---------- */
+const BKEY = 'newtonvr.board.v1';
+function loadBoard(){ try { return JSON.parse(localStorage.getItem(BKEY)) || []; } catch (e) { return []; } }
+function saveBoard(b){ try { localStorage.setItem(BKEY, JSON.stringify(b)); } catch (e) {} }
+let memBoard = loadBoard(), lastEntry = null;
+function renderBoard(el, n){
+  const rows = memBoard.slice().sort((a,b) => b.score - a.score).slice(0, n);
+  if (!rows.length) { el.innerHTML = '<div class="empty">Aún no hay puntajes. ¡Sé el primero!</div>'; return; }
+  el.innerHTML = '<ol class="board">' + rows.map((r,i) =>
+    `<li class="${r === lastEntry ? 'me' : ''}"><span class="r">${i+1}</span><span>${esc(r.name)}</span><span>${r.score}</span><span class="t">${fmt(r.time)} s</span></li>`).join('') + '</ol>';
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function askName(){
+  const total = S.run.scores.reduce((a,b) => a+b, 0), time = S.run.times.reduce((a,b) => a+b, 0);
+  S.run.total = total; S.run.time = time;
+  $('#nmScore').textContent = total;
+  $('#nmText').textContent = `Tiempo total en los 3 niveles: ${fmt(time)} s. Escribe tu nombre para entrar al marcador.`;
+  $('#nameInput').value = '';
+  show('#ovName');
+}
+$('#nameForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('#nameInput').value.trim().slice(0,16) || 'Anónimo';
+  lastEntry = { name, score:S.run.total, time:S.run.time, d:Date.now() };
+  memBoard.push(lastEntry); saveBoard(memBoard);
+  renderBoard($('#fullBoard'), 10); show('#ovBoard');
+});
+let clearArm = false;
+$('#btnClearBoard').addEventListener('click', e => {
+  if (!clearArm) { clearArm = true; e.currentTarget.textContent = '¿Seguro? Toca otra vez'; return; }
+  clearArm = false; e.currentTarget.textContent = 'Borrar marcador';
+  memBoard = []; saveBoard(memBoard); renderBoard($('#fullBoard'), 10);
+});
+
+/* ---------- cuestionario antes / después ---------- */
+const QUIZ = [
+  { q:'Una caja de 10 kg está sobre madera (fricción estática máxima 49 N). Si se empuja con 30 N, ¿qué pasa?',
+    o:['Se mueve con a = 3 m/s²','No se mueve y la fricción vale 49 N','No se mueve y la fricción vale 30 N','Se mueve a velocidad constante'], c:2,
+    e:'La fricción estática se ajusta: vale lo mismo que la fuerza aplicada (30 N) mientras no supere su máximo μsN = 49 N.' },
+  { q:'Cuando la caja ya se desliza, la fricción cinética es, en general…',
+    o:['Mayor que la fricción estática máxima','Menor que la fricción estática máxima','Igual a la fricción estática máxima'], c:1,
+    e:'Como μk < μs, cuesta más arrancar la caja que mantenerla en movimiento. En la gráfica se ve la caída.' },
+  { q:'Si la fuerza neta sobre una caja se duplica y su masa no cambia, la aceleración…',
+    o:['Se reduce a la mitad','No cambia','Se duplica','Se cuadruplica'], c:2,
+    e:'Segunda ley de Newton: a = Fnet / m. Si Fnet se duplica con la misma m, a también se duplica.' },
+  { q:'Madera, m = 10 kg, F = 60 N (μk = 0,30). ¿Cuál es la aceleración de la caja?',
+    o:['6,00 m/s²','3,06 m/s²','1,10 m/s²','0 m/s², no se mueve'], c:1,
+    e:'60 N > 49 N, así que se mueve. fk = 29,4 N; Fnet = 60 − 29,4 = 30,6 N; a = 30,6 / 10 = 3,06 m/s².' },
+  { q:'¿En qué superficie hace falta más fuerza para que la caja empiece a moverse?',
+    o:['Hielo','Madera','Superficie rugosa'], c:2,
+    e:'La rugosa tiene el mayor μs (0,90): con 10 kg necesitas 88,2 N para arrancar, frente a 9,8 N en hielo.' },
+  { q:'En el DCL de una caja quieta sobre un piso horizontal, la fuerza normal N…',
+    o:['Es mayor que el peso','Es igual al peso','Es menor que el peso','Es cero'], c:1,
+    e:'En vertical no hay aceleración: N = P = mg. Por eso la caja ni se hunde ni flota.' }
+];
+const QKEY = 'newtonvr.quiz.v1';
+function loadQ(){ try { return JSON.parse(localStorage.getItem(QKEY)) || { antes:[], despues:[] }; } catch (e) { return { antes:[], despues:[] }; } }
+let qStats = loadQ();
+const Q = { phase:'antes', i:0, ok:0 };
+function startQuiz(){ S.mode = 'quiz'; setChrome(); sfx.click(); quizIntro(); show('#ovQuiz'); }
+$('#goQuiz').addEventListener('click', startQuiz);
+function quizIntro(){
+  $('#quizCard').innerHTML = `<div class="eyebrow">Cuestionario · 6 preguntas</div><h2>¿Antes o después de jugar?</h2>
+    <p>Responde una vez antes de probar Newton VR y otra vez al terminar. Así comparamos si la experiencia mejora la comprensión.</p>
+    <div class="modes" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+      <button class="mode primary" type="button" data-ph="antes"><b>Antes de jugar</b><span>Aún no has probado el juego.</span></button>
+      <button class="mode" type="button" data-ph="despues"><b>Después de jugar</b><span>Ya probaste Explorar o el Desafío.</span></button>
+    </div>${statsHTML()}<div class="actions"><button class="btn" type="button" data-menu>Menú</button></div>`;
+  $('#quizCard').querySelectorAll('[data-ph]').forEach(b => b.onclick = () => { Q.phase = b.dataset.ph; Q.i = 0; Q.ok = 0; quizQ(); });
+}
+function statsHTML(){
+  const avg = a => a.length ? fmt(a.reduce((x,y) => x+y, 0) / a.length, 1) : '–';
+  return `<div class="stats" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+    ${statHTML(`Antes · ${qStats.antes.length} personas`, `${avg(qStats.antes)} / 6`)}
+    ${statHTML(`Después · ${qStats.despues.length} personas`, `${avg(qStats.despues)} / 6`)}</div>`;
+}
+function quizQ(){
+  const it = QUIZ[Q.i];
+  $('#quizCard').innerHTML = `<div class="q-progress">${QUIZ.map((_,k) => `<i class="${k < Q.i ? 'done' : ''}"></i>`).join('')}</div>
+    <div class="eyebrow">Pregunta ${Q.i+1} de ${QUIZ.length} · ${Q.phase === 'antes' ? 'antes' : 'después'} de jugar</div>
+    <h2 style="font-size:clamp(20px,2.6vw,26px)">${it.q}</h2>
+    <div class="q-opts">${it.o.map((o,k) => `<button class="q-opt" type="button" data-k="${k}">${String.fromCharCode(65+k)}) ${o}</button>`).join('')}</div>
+    <div id="qExp"></div>`;
+  const opts = $('#quizCard').querySelectorAll('.q-opt');
+  opts.forEach(b => b.onclick = () => {
+    const k = +b.dataset.k, good = k === it.c;
+    if (good) { Q.ok++; sfx.right(); } else sfx.wrong();
+    opts.forEach(x => { x.disabled = true; if (+x.dataset.k === it.c) x.classList.add('right'); });
+    if (!good) b.classList.add('wrong');
+    $('#qExp').innerHTML = `<div class="lesson q-exp"><b>${good ? '¡Correcto!' : 'No exactamente.'}</b> ${it.e}</div>
+      <div class="actions"><button class="btn go" type="button" id="qNext">${Q.i < QUIZ.length-1 ? 'Siguiente' : 'Ver resultado'}</button></div>`;
+    $('#qNext').onclick = () => { Q.i++; Q.i < QUIZ.length ? quizQ() : quizEnd(); };
+    $('#qNext').focus();
+  });
+}
+function quizEnd(){
+  qStats[Q.phase].push(Q.ok);
+  try { localStorage.setItem(QKEY, JSON.stringify(qStats)); } catch (e) {}
+  $('#quizCard').innerHTML = `<div class="eyebrow">Resultado</div><h2>${Q.ok} de ${QUIZ.length} correctas</h2>
+    <p>${Q.ok === 6 ? '¡Perfecto! Dominas la fricción estática y cinética.' : Q.phase === 'antes' ? 'Ahora juega Newton VR y vuelve a responder después para comparar.' : 'Gracias por participar. Revisa en el juego las preguntas que fallaste.'}</p>
+    ${statsHTML()}
+    <div class="actions">${Q.phase === 'antes' ? '<button class="btn go" type="button" id="qPlay">Ir al Desafío</button>' : ''}
+    <button class="btn" type="button" id="qAgain">Otro participante</button><button class="btn" type="button" data-menu>Menú</button>
+    <button class="btn" type="button" id="qClear">Borrar resultados</button></div>`;
+  $('#qPlay') && ($('#qPlay').onclick = startChallenge);
+  $('#qAgain').onclick = quizIntro;
+  let arm = false;
+  $('#qClear').onclick = e => {
+    if (!arm) { arm = true; e.currentTarget.textContent = '¿Seguro? Toca otra vez'; return; }
+    qStats = { antes:[], despues:[] }; try { localStorage.setItem(QKEY, JSON.stringify(qStats)); } catch (err) {} quizIntro();
+  };
+}
+
+/* ---------- interfaz numérica ---------- */
+function updateCoef(){
+  const { s, fsMax, fk } = params();
+  $('#coef').innerHTML = `<span>${s.name}</span><span>μs ${fmt(s.muS,2)}</span><span>μk ${fmt(s.muK,2)}</span><span style="color:var(--f)">μsN ${fmt(fsMax)} N</span><span style="color:var(--f)">μkN ${fmt(fk)} N</span>`;
+}
+function updateMarks(){
+  const { fsMax, fk } = params();
+  $('#markS').style.left = (fsMax / FMAX * 100) + '%';
+  $('#markK').style.left = (fk / FMAX * 100) + '%';
+}
+function updateHUD(){
+  const { N, P, fsMax, fk } = params();
+  const Fn = S.F - S.f;
+  $('#rF').textContent = fmt(S.F) + ' N';
+  $('#rf').textContent = fmt(S.f) + ' N';
+  $('#rfLabel').textContent = S.sliding ? 'f cinética' : 'f estática';
+  $('#rN').textContent = fmt(N) + ' N';
+  $('#rP').textContent = fmt(P) + ' N';
+  $('#rFn').textContent = fmt(Fn) + ' N';
+  $('#ra').textContent = fmt(S.a, 2) + ' m/s²';
+  $('#rv').textContent = fmt(S.v, 2) + ' m/s';
+  $('#rx').textContent = fmt(S.x, 2) + ' m';
+  $('#rm').textContent = S.m + ' kg';
+  $('#fVal').textContent = fmt(S.F) + ' N';
+  const fill = $('#fill');
+  fill.style.width = (S.F / FMAX * 100) + '%';
+  fill.classList.toggle('over', S.F > fsMax);
+  const pill = $('#statePill');
+  const st = S.sliding ? ['slide','DESLIZANDO · FRICCIÓN CINÉTICA'] : S.F > 0 ? ['hold','QUIETA · LA FRICCIÓN ESTÁTICA AGUANTA'] : ['rest','EN REPOSO'];
+  pill.className = 'statepill ' + st[0]; pill.textContent = st[1];
+  const fe = $('#formula');
+  if (!S.sliding) {
+    fe.innerHTML = S.F > 0
+      ? `<span class="cF">F = ${fmt(S.F)} N</span> ≤ μsN = ${fmt(fsMax)} N → <span class="cf">f = F = ${fmt(S.f)} N</span> → Fnet = 0 → a = 0. ¡Faltan ${fmt(fsMax - S.F)} N para arrancar!`
+      : `En reposo: <span class="cN">N = P = mg = ${S.m} · 9,8 = ${fmt(N)} N</span>. Para arrancar necesitas superar μsN = ${fmt(fsMax)} N.`;
+  } else {
+    fe.innerHTML = `Fnet = <span class="cF">F</span> − <span class="cf">μkN</span> = ${fmt(S.F)} − ${fmt(fk)} = ${fmt(Fn)} N → a = Fnet / m = ${fmt(Fn)} / ${S.m} = <b>${fmt(S.a,2)} m/s²</b>`;
+  }
+  if (S.mode === 'challenge') {
+    const left = Math.max(0, TL - S.t), tm = $('#timer');
+    tm.textContent = fmt(left) + ' s';
+    tm.classList.toggle('warn', left <= 5);
+  }
+}
+
+/* ---------- dibujo de la escena ---------- */
+const cv = $('#scene'), ctx = cv.getContext('2d');
+const gc = $('#graph'), gx = gc.getContext('2d');
+let W = 0, H = 0, GW = 0, GH = 0, DPR = 1;
+function resize(){
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  const r = cv.getBoundingClientRect(); W = r.width; H = r.height;
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  const g = gc.getBoundingClientRect(); GW = g.width; GH = g.height;
+  gc.width = Math.round(GW*DPR); gc.height = Math.round(GH*DPR);
+}
+new ResizeObserver(resize).observe(cv); new ResizeObserver(resize).observe(gc);
+
+function hash(n){ const s = Math.sin(n*127.1)*43758.5453; return s - Math.floor(s); }
+
+function arrow(x1, y1, x2, y2, col, label){
+  const len = Math.hypot(x2-x1, y2-y1);
+  if (len < 2) return;
+  const ang = Math.atan2(y2-y1, x2-x1), hd = Math.min(14, len*.45);
+  ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2 - Math.cos(ang)*hd*.6, y2 - Math.sin(ang)*hd*.6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - hd*Math.cos(ang-.45), y2 - hd*Math.sin(ang-.45));
+  ctx.lineTo(x2 - hd*Math.cos(ang+.45), y2 - hd*Math.sin(ang+.45)); ctx.closePath(); ctx.fill();
+  if (label) {
+    ctx.font = '600 12px "IBM Plex Mono", Consolas, monospace';
+    const tw = ctx.measureText(label).width;
+    let lx = x2 + Math.cos(ang)*10, ly = y2 + Math.sin(ang)*10;
+    if (Math.abs(Math.cos(ang)) < .5) { lx = x2 + 10; ly = y2 + (y2 < y1 ? 4 : 8); }
+    else { lx = Math.cos(ang) > 0 ? x2 + 8 : x2 - tw - 8; ly = y2 - 10; }
+    lx = clamp(lx, 4, W - tw - 4); ly = clamp(ly, 14, H - 6);
+    ctx.fillStyle = 'rgba(10,19,36,.85)'; ctx.fillRect(lx - 4, ly - 12, tw + 8, 17);
+    ctx.fillStyle = col; ctx.fillText(label, lx, ly);
+  }
+}
+
+function drawScene(){
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const view = 10.4, ppm = W / view;
+  const camTarget = S.mode === 'challenge' ? -0.8 : Math.max(-0.8, S.x - 3.6);
+  S.camX += (camTarget - S.camX) * 0.12;
+  if (Math.abs(camTarget - S.camX) > 6) S.camX = camTarget;
+  const shx = S.shake > 0 ? (Math.random()-.5) * S.shake : 0;
+  const sx = wx => (wx - S.camX) * ppm + shx;
+  const gy = Math.round(H * 0.64);
+  const { s, N, P, fsMax, fk } = params();
+
+  // fondo tipo plano técnico
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#0e1d38'); bg.addColorStop(1, '#0a1427');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(120,160,230,.07)'; ctx.lineWidth = 1;
+  const step = ppm / 2, off = ((-S.camX * ppm) % step + step) % step;
+  ctx.beginPath();
+  for (let x = off; x < W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, gy); }
+  for (let y = gy; y > 0; y -= step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+
+  // zona meta
+  const side = boxSide(), bp = side * ppm;
+  if (S.mode === 'challenge') {
+    const z0 = sx(ZONE[0]), z1 = sx(ZONE[1]), zt = gy - bp * 2.1;
+    const zg = ctx.createLinearGradient(0, zt, 0, gy);
+    zg.addColorStop(0, 'rgba(61,220,132,0)'); zg.addColorStop(1, 'rgba(61,220,132,.28)');
+    ctx.fillStyle = zg; ctx.fillRect(z0, zt, z1 - z0, gy - zt);
+    ctx.setLineDash([6, 5]); ctx.strokeStyle = '#3ddc84'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(z0, zt); ctx.lineTo(z0, gy); ctx.moveTo(z1, zt); ctx.lineTo(z1, gy); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#3ddc84'; ctx.font = '700 14px "Chakra Petch", "Segoe UI", sans-serif';
+    ctx.textAlign = 'center'; ctx.fillText('META', (z0 + z1)/2, zt - 8); ctx.textAlign = 'left';
+    // pared final
+    const wx = sx(WALL);
+    for (let y = gy - bp*1.6, k = 0; y < gy; y += 12, k++) { ctx.fillStyle = k % 2 ? '#ffb020' : '#1b2438'; ctx.fillRect(wx, y, 14, 12); }
+    ctx.fillStyle = '#8ea3c6'; ctx.font = '500 11px "IBM Plex Mono", Consolas, monospace';
+    ctx.fillText('FIN', wx - 2, gy - bp*1.6 - 6);
+  }
+
+  // superficie
+  const thick = 18;
+  ctx.fillStyle = s.col; ctx.fillRect(0, gy, W, thick);
+  const m0 = Math.floor(S.camX) - 1, m1 = Math.ceil(S.camX + view) + 1;
+  if (S.surf === 'wood') {
+    ctx.strokeStyle = 'rgba(40,20,5,.55)'; ctx.lineWidth = 1.5;
+    for (let m = m0; m <= m1; m += .5) { const x = sx(m + hash(m)*.2); ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x, gy + thick); ctx.stroke(); }
+    ctx.strokeStyle = 'rgba(255,220,170,.18)';
+    ctx.beginPath(); ctx.moveTo(0, gy + 6); ctx.lineTo(W, gy + 6); ctx.moveTo(0, gy + 12); ctx.lineTo(W, gy + 12); ctx.stroke();
+  } else if (S.surf === 'ice') {
+    ctx.fillStyle = 'rgba(255,255,255,.75)';
+    for (let m = m0; m <= m1; m += .25) { const x = sx(m + hash(m)*.2); ctx.fillRect(x, gy + 3 + hash(m+3)*10, 10 + hash(m+7)*22, 1.5); }
+    ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(0, gy, W, 3);
+  } else {
+    for (let m = m0; m <= m1; m += .04) {
+      const x = sx(m), h = hash(m*3.1);
+      ctx.fillStyle = h > .5 ? 'rgba(255,255,255,.18)' : 'rgba(0,0,0,.35)';
+      ctx.fillRect(x, gy + hash(m*7.3)*thick, 2 + h*2, 2 + h*2);
+    }
+    ctx.fillStyle = '#4a4f58';
+    for (let m = m0; m <= m1; m += .07) { const x = sx(m), h = hash(m*5.7); ctx.fillRect(x, gy - h*3, 3, h*3); }
+  }
+  ctx.fillStyle = '#0b1630'; ctx.fillRect(0, gy + thick, W, H - gy - thick);
+
+  // regla en metros
+  ctx.strokeStyle = 'rgba(142,163,198,.6)'; ctx.fillStyle = '#8ea3c6'; ctx.lineWidth = 1;
+  ctx.font = '500 11px "IBM Plex Mono", Consolas, monospace'; ctx.textAlign = 'center';
+  for (let m = Math.max(0, m0); m <= m1; m++) {
+    const x = sx(m);
+    ctx.beginPath(); ctx.moveTo(x, gy + thick); ctx.lineTo(x, gy + thick + 10); ctx.stroke();
+    ctx.fillText(m + ' m', x, gy + thick + 23);
+    ctx.beginPath(); ctx.moveTo(sx(m + .5), gy + thick); ctx.lineTo(sx(m + .5), gy + thick + 5); ctx.stroke();
+  }
+  ctx.textAlign = 'left';
+
+  // predicción del punto de frenado
+  const predictOn = (S.mode === 'explore' && $('#chkPredict').checked) || (S.mode === 'challenge' && S.level === 0);
+  if (predictOn && S.sliding && S.v > 0.02) {
+    const xs = S.x + S.v*S.v / (2 * s.muK * G);
+    const px = sx(xs) - bp/2;
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(231,238,251,.55)'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(px, gy - bp, bp, bp); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(231,238,251,.8)'; ctx.font = '500 11px "IBM Plex Mono", Consolas, monospace';
+    ctx.fillText('si sueltas: ' + fmt(xs, 2) + ' m', px, gy + thick + 40);
+  }
+
+  // partículas de roce
+  for (const p of S.parts) {
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.c; ctx.fillRect(sx(p.x), p.y, p.r, p.r);
+  }
+  ctx.globalAlpha = 1;
+
+  // caja
+  const strain = !S.sliding && S.F > 0 ? (S.F / fsMax) : 0;
+  const jig = strain > .6 ? (Math.random() - .5) * strain * 1.6 : 0;
+  const bx = sx(S.x) - bp/2 + jig, by = gy - bp;
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(bx + 4, gy - 2, bp, 4);
+  const bgd = ctx.createLinearGradient(bx, by, bx, by + bp);
+  bgd.addColorStop(0, '#6f86b3'); bgd.addColorStop(1, '#43577f');
+  ctx.fillStyle = bgd; ctx.fillRect(bx, by, bp, bp);
+  ctx.strokeStyle = '#a9bce0'; ctx.lineWidth = 2; ctx.strokeRect(bx + 1, by + 1, bp - 2, bp - 2);
+  ctx.strokeStyle = 'rgba(169,188,224,.35)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(bx + 6, by + 6); ctx.lineTo(bx + bp - 6, by + bp - 6); ctx.moveTo(bx + bp - 6, by + 6); ctx.lineTo(bx + 6, by + bp - 6); ctx.stroke();
+  ctx.fillStyle = '#e7eefb'; ctx.font = `700 ${Math.max(12, bp*.2)}px "Chakra Petch", "Segoe UI", sans-serif`; ctx.textAlign = 'center';
+  ctx.fillStyle = '#26365a'; ctx.fillRect(bx + bp*.18, by + bp*.36, bp*.64, bp*.28);
+  ctx.fillStyle = '#e7eefb'; ctx.fillText(S.m + ' kg', bx + bp/2, by + bp*.57); ctx.textAlign = 'left';
+
+  // DCL
+  const aS = Math.min(H * 0.25, 150) / 150;
+  const cx = bx + bp/2, cy = by + bp/2;
+  ctx.fillStyle = '#e7eefb'; ctx.beginPath(); ctx.arc(cx, cy, 3.5, 0, 7); ctx.fill();
+  arrow(cx, cy, cx, cy - N*aS, '#3ddc84', 'N ' + fmt(N) + ' N');
+  arrow(cx, cy, cx, cy + P*aS, '#ffb020', 'P ' + fmt(P) + ' N');
+  if (S.F > 0.05) arrow(cx, cy, cx + S.F*aS, cy, '#4da3ff', 'F ' + fmt(S.F) + ' N');
+  if (S.f > 0.05) arrow(cx, cy + 8, cx - S.f*aS, cy + 8, '#ff5d62', 'f ' + fmt(S.f) + ' N');
+  if (S.v > 0.01) {
+    ctx.fillStyle = '#e7eefb'; ctx.font = '600 12px "IBM Plex Mono", Consolas, monospace'; ctx.textAlign = 'center';
+    ctx.fillText('v = ' + fmt(S.v, 2) + ' m/s', cx, by - 14 - (N*aS - bp/2 > 0 ? 0 : 0)); ctx.textAlign = 'left';
+  }
+
+  // demo del menú: reiniciar caja cuando avanza demasiado
+  if (S.mode === 'menu' && S.x > 8 && S.v === 0) { const ks = Object.keys(SURF); S.surf = ks[(ks.indexOf(S.surf)+1) % 3]; resetBox(); }
+}
+
+function spawnParts(dt){
+  if (S.sliding && S.v > .05) {
+    const n = Math.min(4, S.v * 2.5 * (S.surf === 'ice' ? .4 : 1));
+    const gy = H * .64, side = boxSide(), ppm = W / 10.4;
+    const cols = { ice:'#e6f6ff', wood:'#d9a26a', rough:'#b9bec8' };
+    for (let i = 0; i < n; i++) if (Math.random() < .7) S.parts.push({ x:S.x - side/2 + Math.random()*.1, y:gy - 2 - Math.random()*4,
+      vx:-Math.random()*.6, vy:-(20 + Math.random()*50), r:1.5 + Math.random()*2.5, life:1, c:cols[S.surf] });
+  }
+  for (const p of S.parts) { p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 140*dt; p.life -= dt*1.6; }
+  S.parts = S.parts.filter(p => p.life > 0);
+  if (S.parts.length > 260) S.parts.splice(0, S.parts.length - 260);
+}
+
+/* ---------- gráfica f vs F ---------- */
+function niceMax(v){ const st = [20,30,40,50,60,80,100,120,150,160]; return st.find(s => s >= v) || 160; }
+function drawGraph(){
+  gx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  gx.clearRect(0, 0, GW, GH);
+  const { fsMax, fk } = params();
+  const L = 38, R = 10, T = 12, B = 30, w = GW - L - R, h = GH - T - B;
+  const yMax = niceMax(fsMax * 1.25);
+  const X = F => L + F / FMAX * w, Y = f => T + h - f / yMax * h;
+  gx.font = '500 10px "IBM Plex Mono", Consolas, monospace'; gx.fillStyle = '#8ea3c6'; gx.strokeStyle = 'rgba(142,163,198,.15)'; gx.lineWidth = 1;
+  gx.textAlign = 'center';
+  for (let F = 0; F <= 150; F += 30) { gx.beginPath(); gx.moveTo(X(F), T); gx.lineTo(X(F), T + h); gx.stroke(); gx.fillText(F, X(F), T + h + 13); }
+  gx.textAlign = 'right';
+  const ys = yMax <= 40 ? 10 : yMax <= 80 ? 20 : 40;
+  for (let f = 0; f <= yMax; f += ys) { gx.beginPath(); gx.moveTo(L, Y(f)); gx.lineTo(L + w, Y(f)); gx.stroke(); gx.fillText(f, L - 6, Y(f) + 3); }
+  gx.textAlign = 'center'; gx.fillText('Fuerza aplicada F (N)', L + w/2, GH - 3);
+  gx.save(); gx.translate(10, T + h/2); gx.rotate(-Math.PI/2); gx.fillText('Fricción f (N)', 0, 0); gx.restore();
+  // modelo teórico
+  gx.setLineDash([5, 4]); gx.strokeStyle = 'rgba(142,163,198,.75)'; gx.lineWidth = 1.5;
+  gx.beginPath(); gx.moveTo(X(0), Y(0)); gx.lineTo(X(fsMax), Y(fsMax)); gx.lineTo(X(fsMax), Y(fk)); gx.lineTo(X(FMAX), Y(fk)); gx.stroke(); gx.setLineDash([]);
+  gx.fillStyle = '#ff5d62'; gx.textAlign = 'left';
+  gx.fillText('μsN = ' + fmt(fsMax) + ' N', Math.min(X(fsMax) + 5, L + w - 80), Math.max(Y(fsMax) + 4, T + 10));
+  gx.fillText('μkN = ' + fmt(fk) + ' N', Math.min(X(fsMax) + 5, L + w - 80), Y(fk) + 14);
+  // puntos medidos
+  for (const p of S.pts) {
+    gx.fillStyle = p.k ? 'rgba(255,93,98,.9)' : 'rgba(255,176,32,.85)';
+    gx.fillRect(X(p.F) - 1.5, Y(p.f) - 1.5, 3, 3);
+  }
+  if (S.F > 0 || S.f > 0) {
+    gx.fillStyle = 'rgba(255,93,98,.25)'; gx.beginPath(); gx.arc(X(S.F), Y(S.f), 9, 0, 7); gx.fill();
+    gx.fillStyle = '#ff5d62'; gx.beginPath(); gx.arc(X(S.F), Y(S.f), 4.5, 0, 7); gx.fill();
+  }
+}
+
+/* ---------- bucle principal ---------- */
+let last = performance.now(), acc = 0;
+function frame(now){
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  pollPad();
+  S.F = readForce(dt);
+  acc += dt;
+  while (acc >= DT) { physStep(DT); acc -= DT; }
+  if (S.mode === 'challenge') challengeTick(dt);
+  S.sampleT += dt;
+  if (S.sampleT > 1/30 && (S.F > 0 || S.v > 0)) {
+    S.sampleT = 0; S.pts.push({ F:S.F, f:S.f, k:S.sliding });
+    if (S.pts.length > 900) S.pts.shift();
+  }
+  S.shake = Math.max(0, S.shake - dt*30);
+  spawnParts(dt);
+  if (W > 0) drawScene();
+  if (GW > 0) drawGraph();
+  updateHUD(); updateScrape();
+  requestAnimationFrame(frame);
+}
+
+resize(); goMenu(); requestAnimationFrame(frame);
+})();
+</script>
+
+</html>
