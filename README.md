@@ -2,7 +2,7 @@
 
 Juego educativo de física para la Gala Tecnológica: empuja una caja, descubre cuándo se rompe la fricción estática y detenla dentro de la zona meta usando la fricción cinética.
 
-**Jugar en línea:** https://leonardo-liang.github.io/newton-vr/
+**Jugar en línea:** https://xiaoting507.github.io/newton-vr/
 
 ## Qué enseña
 - Diagrama de Cuerpo Libre en tiempo real (N, P, F, f).
