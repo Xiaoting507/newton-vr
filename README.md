@@ -20,5 +20,18 @@ Juego educativo de física para la Gala Tecnológica: empuja una caja, descubre 
 - Arrastra la barra de fuerza para fijar un valor exacto.
 - Mando USB: gatillo derecho (RT/R2). `R` reinicia, `Esc` vuelve al menú.
 
+## Modo VR (WebXR)
+1. En las gafas (Meta Quest, Pico u otras), abre el navegador y entra a https://xiaoting507.github.io/newton-vr/
+2. Toca **Entrar en VR** y acepta el permiso.
+3. Controles dentro de VR:
+   - **Gatillo** (analógico): fuerza aplicada de 0 a 150 N según cuánto lo presiones.
+   - **A / X**: opción principal (Desafío, Empezar, Siguiente nivel).
+   - **B / Y**: opción secundaria (Explorar, Reintentar) o reiniciar la caja.
+   - **Stick ← →**: cambiar superficie · **↑ ↓**: cambiar masa (modo Explorar).
+   - **Clic en el stick**: volver al menú.
+4. El control vibra mientras la fricción estática aguanta y al romperse.
+
+El modo VR necesita internet (carga three.js) y el link https. El archivo local funciona sin VR.
+
 ## Jugar sin internet
 Descarga `index.html` y ábrelo con doble clic en cualquier navegador.

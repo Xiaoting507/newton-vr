@@ -45,6 +45,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 .dots i.ok{background:var(--N);border-color:var(--N)}
 .iconbtn{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 11px;font-size:13px}
 .iconbtn:hover{border-color:var(--accent)}
+.iconbtn.vr{background:var(--F);border-color:var(--F);color:#04122a;font-weight:600}
+.iconbtn.vr:disabled{background:var(--panel);border-color:var(--line);color:var(--muted);cursor:help;font-weight:400}
 
 /* escena */
 .scene{grid-area:scene;position:relative;min-height:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
@@ -185,6 +187,7 @@ kbd{font:500 11px var(--mono);border:1px solid var(--line);border-bottom-width:2
       <span class="dots" id="dots" hidden><i></i><i></i><i></i></span>
       <span class="chip timer" id="timer" hidden>15,0 s</span>
     </div>
+    <button class="iconbtn vr" id="btnVR" type="button" disabled>Buscando VR…</button>
     <button class="iconbtn" id="btnSound" type="button" aria-pressed="true">Sonido: sí</button>
     <button class="iconbtn" id="btnFull" type="button">Pantalla completa</button>
     <button class="iconbtn" id="btnMenu" type="button">Menú</button>
@@ -277,7 +280,7 @@ kbd{font:500 11px var(--mono);border:1px solid var(--line);border-bottom-width:2
     </div>
     <div class="menu-foot">
       <div class="mini-board"><h4>Mejores puntajes</h4><div id="menuBoard"></div></div>
-      <div class="keys">Teclas: <kbd>Espacio</kbd> empujar · <kbd>R</kbd> reiniciar · <kbd>Esc</kbd> menú<br>Compatible con mando: gatillo derecho (RT/R2).<br><span id="padState">Ningún mando detectado</span></div>
+      <div class="keys">Teclas: <kbd>Espacio</kbd> empujar · <kbd>R</kbd> reiniciar · <kbd>Esc</kbd> menú<br>Compatible con mando: gatillo derecho (RT/R2).<br>Gafas VR: abre este link en el navegador de las gafas y toca «Entrar en VR».<br><span id="padState">Ningún mando detectado</span></div>
     </div>
   </div>
 </div>
@@ -335,6 +338,7 @@ kbd{font:500 11px var(--mono);border:1px solid var(--line);border-bottom-width:2
   <div class="card" id="quizCard"></div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (() => {
 'use strict';
@@ -399,6 +403,8 @@ function physStep(dt){
 
 function onBreak(fsMax, fk){
   if (S.mode === 'menu') return;
+  VR.flashT = performance.now();
+  if (VR.session) buzz(1, 160);
   const fl = $('#flash');
   $('#flashSub').textContent = `F superó μsN = ${fmt(fsMax)} N · ahora f = μkN = ${fmt(fk)} N`;
   fl.hidden = false; fl.classList.remove('show'); void fl.offsetWidth; fl.classList.add('show');
@@ -430,6 +436,20 @@ function pollPad(){
     input.pad = Math.max(input.pad, rt);
     if (a0 && !pollPad.prevA) padConfirm();
     pollPad.prevA = a0;
+  }
+  if (VR.session) {                    // controles de las gafas: gatillo analógico = fuerza
+    for (const src of VR.session.inputSources) {
+      const gp = src.gamepad;
+      if (!gp) continue;
+      name = 'VR';
+      input.pad = Math.max(input.pad, gp.buttons[0] ? gp.buttons[0].value : 0);
+      const ax = gp.axes[2] || 0, ay = gp.axes[3] || 0;
+      const st = { A:!!(gp.buttons[4] && gp.buttons[4].pressed), B:!!(gp.buttons[5] && gp.buttons[5].pressed),
+        M:!!(gp.buttons[3] && gp.buttons[3].pressed), R:ax > .7, L:ax < -.7, U:ay < -.7, D:ay > .7 };
+      const pv = VR.prevBtn[src.handedness] || {};
+      for (const k in st) if (st[k] && !pv[k]) vrPress(k);
+      VR.prevBtn[src.handedness] = st;
+    }
   }
   const el = $('#padState');
   const txt = name ? 'Mando conectado: gatillo derecho = fuerza' : 'Ningún mando detectado';
@@ -612,7 +632,7 @@ function endLevel(ok, why=''){
     stars = prec > .7 ? 3 : prec > .35 ? 2 : 1;
     score = Math.round(1000 + (TL - S.t) * 40 + prec * 500);
     S.run.scores.push(score); S.run.times.push(S.t);
-    sfx.win();
+    sfx.win(); if (VR.session) buzz(.8, 300);
   } else sfx.fail();
   updateDots();
   setTimeout(() => {
@@ -1007,9 +1027,10 @@ function drawGraph(){
 }
 
 /* ---------- bucle principal ---------- */
-let last = performance.now(), acc = 0;
-function frame(now){
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+let last = performance.now(), acc = 0, rafId = 0;
+function frame(now){ tick(now); rafId = requestAnimationFrame(frame); }
+function tick(now){
+  const dt = Math.min(0.05, Math.max(0, now - last) / 1000); last = now;
   pollPad();
   S.F = readForce(dt);
   acc += dt;
@@ -1022,13 +1043,396 @@ function frame(now){
   }
   S.shake = Math.max(0, S.shake - dt*30);
   spawnParts(dt);
-  if (W > 0) drawScene();
+  if (W > 0 && !VR.session) drawScene();
   if (GW > 0) drawGraph();
   updateHUD(); updateScrape();
-  requestAnimationFrame(frame);
 }
 
-resize(); goMenu(); requestAnimationFrame(frame);
+/* ---------- modo VR inmersivo (WebXR + three.js) ---------- */
+// El jugador está de pie en el origen; la pista corre de izquierda a derecha frente a él.
+const VR = { session:null, built:false, prevBtn:{}, lastSurf:'', lastM:0, msgSig:'', t:0, flashT:-1e9 };
+const TZ = -2.1, wx = m => m - 2;
+const vrBtn = $('#btnVR');
+
+function vrSupport(){
+  const off = (txt, why) => { vrBtn.textContent = txt; vrBtn.disabled = true; vrBtn.title = why; };
+  if (!window.THREE) return off('VR sin motor 3D', 'Conéctate a internet para cargar el motor 3D (three.js).');
+  if (!navigator.xr || !window.isSecureContext) return off('VR no disponible', 'Abre el link https del juego en el navegador de tus gafas VR.');
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    if (ok) { vrBtn.disabled = false; vrBtn.textContent = 'Entrar en VR'; vrBtn.title = ''; }
+    else off('VR no disponible', 'Este navegador no tiene realidad virtual. Abre el link en el navegador de tus gafas.');
+  }).catch(() => off('VR no disponible', 'No se pudo comprobar la realidad virtual en este navegador.'));
+}
+vrBtn.addEventListener('click', async () => {
+  audioOn();
+  if (VR.session) { VR.session.end(); return; }
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures:['local-floor'] });
+    await startVR(session);
+  } catch (err) {
+    vrBtn.textContent = 'No se pudo entrar en VR';
+    setTimeout(vrSupport, 3000);
+  }
+});
+
+async function startVR(session){
+  if (!VR.built) buildVR();
+  const r = VR.renderer;
+  r.xr.setReferenceSpaceType('local-floor');
+  await r.xr.setSession(session);
+  VR.session = session; VR.msgSig = ''; VR.lastSurf = ''; VR.lastM = 0;
+  cancelAnimationFrame(rafId);
+  vrBtn.textContent = 'Salir de VR';
+  session.addEventListener('end', () => {
+    VR.session = null; r.setAnimationLoop(null); vrBtn.textContent = 'Entrar en VR';
+    last = performance.now(); rafId = requestAnimationFrame(frame);
+  });
+  r.setAnimationLoop(t => { tick(t); renderVR(t); });
+}
+
+function buzz(v, ms){
+  if (!VR.session) return;
+  for (const src of VR.session.inputSources) {
+    const h = src.gamepad && src.gamepad.hapticActuators && src.gamepad.hapticActuators[0];
+    if (h && h.pulse) h.pulse(Math.min(1, v), ms);
+  }
+}
+
+function vrPress(k){
+  if (k === 'M') { goMenu(); return; }
+  const ov = OVS.find(o => !$(o).hidden);
+  if (!ov) {
+    if (k === 'B') { if (S.mode === 'explore') resetBox(); else if (S.mode === 'challenge') loadLevel(S.level); }
+    if (S.mode === 'explore' && 'RLUD'.includes(k)) {
+      const ks = Object.keys(SURF), ms = [5, 10, 15];
+      if (k === 'R' || k === 'L') S.surf = ks[(ks.indexOf(S.surf) + (k === 'R' ? 1 : 2)) % 3];
+      else S.m = ms[(ms.indexOf(S.m) + (k === 'U' ? 1 : 2)) % 3];
+      resetBox(); setChrome(); sfx.click();
+    }
+    return;
+  }
+  if (k !== 'A' && k !== 'B') return;
+  const first = k === 'A';
+  if (ov === '#ovResult') { const bs = $('#resActions').querySelectorAll('button'); const b = first ? bs[0] : bs[1]; b && b.click(); return; }
+  if (ov === '#ovName') {
+    if (first) { if (!$('#nameInput').value.trim()) $('#nameInput').value = 'Visitante VR'; $('#nameForm').requestSubmit(); }
+    return;
+  }
+  if (ov === '#ovQuiz') { if (!first) goMenu(); return; }
+  const map = { '#ovMenu':['#goChallenge','#goExplore'], '#ovIntro':['#btnBegin','[data-menu]'], '#ovBoard':['#btnAgain','[data-menu]'] };
+  const b = $(ov).querySelector(map[ov][first ? 0 : 1]);
+  b && b.click();
+}
+
+function canvasPanel(T, pw, ph, mw, mh){
+  const cv = document.createElement('canvas'); cv.width = pw; cv.height = ph;
+  const tex = new T.CanvasTexture(cv);
+  const mesh = new T.Mesh(new T.PlaneGeometry(mw, mh), new T.MeshBasicMaterial({ map:tex, transparent:true }));
+  VR.scene.add(mesh);
+  return { cv, g:cv.getContext('2d'), tex, mesh };
+}
+function rrect(g, x, y, w, h, r){
+  g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+function wrap(g, text, x, y, maxW, lh){
+  const words = String(text).split(' '); let line = '';
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (g.measureText(test).width > maxW && line) { g.fillText(line, x, y); y += lh; line = w; } else line = test;
+  }
+  if (line) { g.fillText(line, x, y); y += lh; }
+  return y;
+}
+const FD = '"Chakra Petch", "Segoe UI", sans-serif', FM = '"IBM Plex Mono", Consolas, monospace', FB = '"IBM Plex Sans", "Segoe UI", sans-serif';
+
+function makeArrow(T, color, css){
+  const mat = new T.MeshBasicMaterial({ color, depthTest:false, transparent:true });
+  const g = new T.Group();
+  const shaft = new T.Mesh(new T.CylinderGeometry(.02, .02, 1, 10), mat);
+  const head = new T.Mesh(new T.ConeGeometry(.055, .14, 16), mat);
+  shaft.renderOrder = head.renderOrder = 20;
+  g.add(shaft, head); VR.scene.add(g);
+  const cv = document.createElement('canvas'); cv.width = 384; cv.height = 96;
+  const tex = new T.CanvasTexture(cv);
+  const lbl = new T.Sprite(new T.SpriteMaterial({ map:tex, depthTest:false, transparent:true }));
+  lbl.scale.set(.36, .09, 1); lbl.renderOrder = 21; VR.scene.add(lbl);
+  return { g, shaft, head, lbl, cv, tex, css, txt:'' };
+}
+function setArrow(a, x, y, z, dx, dy, len, label){
+  const on = len > .01;
+  a.g.visible = a.lbl.visible = on;
+  if (!on) return;
+  a.g.position.set(x, y, z);
+  a.g.rotation.z = dy ? (dy > 0 ? 0 : Math.PI) : (dx > 0 ? -Math.PI/2 : Math.PI/2);
+  const L = Math.max(.001, len - .14);
+  a.shaft.scale.y = L; a.shaft.position.y = L/2; a.head.position.y = L + .07;
+  a.lbl.position.set(x + dx*(len + .22) + (dy ? .22 : 0), y + dy*(len + .02) + (dx ? .09 : 0), z);
+  if (a.txt === label) return;
+  a.txt = label;
+  const g = a.cv.getContext('2d');
+  g.clearRect(0, 0, 384, 96);
+  g.fillStyle = 'rgba(10,19,36,.88)'; rrect(g, 4, 8, 376, 80, 14); g.fill();
+  g.fillStyle = a.css; g.font = `600 42px ${FM}`; g.textAlign = 'center'; g.fillText(label, 192, 62);
+  a.tex.needsUpdate = true;
+}
+
+function buildVR(){
+  const T = THREE;
+  const r = new T.WebGLRenderer({ antialias:true });
+  r.setPixelRatio(1); r.setSize(640, 480); r.xr.enabled = true;
+  r.domElement.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+  document.body.append(r.domElement);
+  const sc = new T.Scene();
+  sc.background = new T.Color(0x0a1324); sc.fog = new T.Fog(0x0a1324, 12, 34);
+  VR.renderer = r; VR.scene = sc; VR.camera = new T.PerspectiveCamera(70, 4/3, .05, 100);
+  sc.add(new T.HemisphereLight(0xcfe0ff, 0x18233d, 1));
+  const sun = new T.DirectionalLight(0xffffff, .7); sun.position.set(3, 6, 4); sc.add(sun);
+
+  const floor = new T.Mesh(new T.PlaneGeometry(80, 80), new T.MeshLambertMaterial({ color:0x0c1830 }));
+  floor.rotation.x = -Math.PI/2; sc.add(floor);
+  const grid = new T.GridHelper(80, 80, 0x2a4470, 0x172a4c); grid.position.y = .002; sc.add(grid);
+
+  // pista de -1 a 31 m, 128 px por metro
+  VR.trackCv = document.createElement('canvas'); VR.trackCv.width = 4096; VR.trackCv.height = 180;
+  VR.trackTex = new T.CanvasTexture(VR.trackCv); VR.trackTex.anisotropy = r.capabilities.getMaxAnisotropy();
+  const track = new T.Mesh(new T.PlaneGeometry(32, 1.4), new T.MeshLambertMaterial({ map:VR.trackTex }));
+  track.rotation.x = -Math.PI/2; track.position.set(wx(15), .006, TZ); sc.add(track);
+
+  // pared de fondo con el título
+  const bd = canvasPanel(T, 2048, 512, 12, 3);
+  bd.mesh.position.set(wx(3.5), 2.4, -8);
+  const g = bd.g;
+  g.fillStyle = '#0f1c33'; g.fillRect(0, 0, 2048, 512);
+  g.strokeStyle = '#22385e'; g.lineWidth = 6; g.strokeRect(3, 3, 2042, 506);
+  g.font = `700 190px ${FD}`; g.fillStyle = '#e7eefb'; g.fillText('NEWTON', 90, 250);
+  g.fillStyle = '#4da3ff'; g.fillText('VR', 90 + g.measureText('NEWTON ').width, 250);
+  g.font = `500 64px ${FD}`; g.fillStyle = '#e7eefb'; g.fillText('¿Qué fuerza necesitas para mover la caja?', 95, 350);
+  g.font = `600 44px ${FM}`;
+  [['N normal','#3ddc84'],['P peso','#ffb020'],['F aplicada','#4da3ff'],['f fricción','#ff5d62']].forEach(([t, c], i) => {
+    g.fillStyle = c; g.fillRect(95 + i*470, 410, 40, 40); g.fillText(t, 150 + i*470, 446);
+  });
+  bd.tex.needsUpdate = true;
+
+  // caja
+  VR.boxCv = document.createElement('canvas'); VR.boxCv.width = VR.boxCv.height = 256;
+  VR.boxTex = new T.CanvasTexture(VR.boxCv);
+  VR.box = new T.Mesh(new T.BoxGeometry(1, 1, 1), new T.MeshLambertMaterial({ map:VR.boxTex }));
+  sc.add(VR.box);
+  VR.shadow = new T.Mesh(new T.CircleGeometry(.62, 32), new T.MeshBasicMaterial({ color:0x000000, transparent:true, opacity:.38, depthWrite:false }));
+  VR.shadow.rotation.x = -Math.PI/2; VR.shadow.position.set(0, .01, TZ); sc.add(VR.shadow);
+
+  // zona meta y final de pista (solo en el desafío)
+  VR.zone = new T.Mesh(new T.BoxGeometry(1, 1.6, 1.4), new T.MeshBasicMaterial({ color:0x3ddc84, transparent:true, opacity:.15, depthWrite:false }));
+  VR.zone.position.set(wx(6.5), .8, TZ);
+  VR.zone.add(new T.LineSegments(new T.EdgesGeometry(VR.zone.geometry), new T.LineBasicMaterial({ color:0x3ddc84 })));
+  sc.add(VR.zone);
+  const ml = canvasPanel(T, 512, 160, 1, .31);
+  ml.g.font = `700 120px ${FD}`; ml.g.fillStyle = '#3ddc84'; ml.g.textAlign = 'center'; ml.g.fillText('META', 256, 125); ml.tex.needsUpdate = true;
+  ml.mesh.position.set(wx(6.5), 1.85, TZ); VR.metaLbl = ml.mesh;
+  VR.wall = new T.Mesh(new T.BoxGeometry(.15, 1.2, 1.6), new T.MeshLambertMaterial({ color:0xffb020 }));
+  VR.wall.position.set(wx(WALL) + .075, .6, TZ); sc.add(VR.wall);
+
+  VR.arrows = {
+    N:makeArrow(T, 0x3ddc84, '#3ddc84'), P:makeArrow(T, 0xffb020, '#ffb020'),
+    F:makeArrow(T, 0x4da3ff, '#4da3ff'), f:makeArrow(T, 0xff5d62, '#ff5d62')
+  };
+
+  // paneles: datos a la izquierda, gráfica a la derecha, mensajes al centro
+  VR.hud = canvasPanel(T, 1024, 768, 1.2, .9);
+  VR.hud.mesh.position.set(-1.3, 1.35, -1.2); VR.hud.mesh.lookAt(0, 1.4, 0);
+  VR.graph = canvasPanel(T, 800, 660, 1.1, .9075);
+  VR.graph.mesh.position.set(1.3, 1.35, -1.2); VR.graph.mesh.lookAt(0, 1.4, 0);
+  VR.msg = canvasPanel(T, 1400, 820, 1.4, .82);
+  VR.msg.mesh.position.set(0, 1.55, -1.4); VR.msg.mesh.renderOrder = 30;
+
+  // rayos de los controles
+  for (let i = 0; i < 2; i++) {
+    const c = r.xr.getController(i);
+    const geo = new T.BufferGeometry().setFromPoints([new T.Vector3(0, 0, 0), new T.Vector3(0, 0, -.45)]);
+    c.add(new T.Line(geo, new T.LineBasicMaterial({ color:0x4da3ff })));
+    c.add(new T.Mesh(new T.SphereGeometry(.018, 12, 8), new T.MeshBasicMaterial({ color:0xe7eefb })));
+    sc.add(c);
+  }
+  VR.built = true;
+}
+
+function drawTrack(){
+  const c = VR.trackCv, g = c.getContext('2d'), ppm = 128, H2 = c.height, s = SURF[S.surf];
+  const X = m => (m + 1) * ppm;
+  g.fillStyle = s.col; g.fillRect(0, 0, c.width, H2);
+  if (S.surf === 'wood') {
+    g.strokeStyle = 'rgba(40,20,5,.5)'; g.lineWidth = 3;
+    for (let row = 0; row < 6; row++) {
+      const y = row * H2/6, sh = hash(row) * 1.2;
+      g.beginPath(); g.moveTo(0, y); g.lineTo(c.width, y); g.stroke();
+      for (let m = -1 + sh; m < 31; m += 1.2) { g.beginPath(); g.moveTo(X(m), y); g.lineTo(X(m), y + H2/6); g.stroke(); }
+    }
+    g.strokeStyle = 'rgba(255,220,170,.14)'; g.lineWidth = 1.5;
+    for (let i = 0; i < 40; i++) { const y = hash(i*3.3) * H2; g.beginPath(); g.moveTo(0, y); g.lineTo(c.width, y + 4); g.stroke(); }
+  } else if (S.surf === 'ice') {
+    g.fillStyle = 'rgba(255,255,255,.7)';
+    for (let i = 0; i < 700; i++) g.fillRect(hash(i)*c.width, hash(i + .5)*H2, 20 + hash(i + .7)*60, 2);
+  } else {
+    for (let i = 0; i < 9000; i++) {
+      const h = hash(i*1.7);
+      g.fillStyle = h > .5 ? 'rgba(255,255,255,.18)' : 'rgba(0,0,0,.35)';
+      g.fillRect(hash(i*2.3)*c.width, hash(i*3.1)*H2, 2 + h*4, 2 + h*4);
+    }
+  }
+  g.font = `700 24px ${FM}`; g.lineWidth = 5; g.strokeStyle = 'rgba(10,19,36,.85)'; g.fillStyle = '#ffffff';
+  for (let m = 0; m <= 30; m++) {
+    g.fillStyle = 'rgba(10,19,36,.85)'; g.fillRect(X(m) - 2, H2 - 44, 4, 44);
+    g.fillStyle = '#ffffff'; g.strokeText(m + ' m', X(m) + 8, H2 - 10); g.fillText(m + ' m', X(m) + 8, H2 - 10);
+  }
+  g.setLineDash([16, 12]); g.strokeStyle = '#ffffff'; g.lineWidth = 4;
+  g.beginPath(); g.moveTo(X(0), 0); g.lineTo(X(0), H2 - 48); g.stroke(); g.setLineDash([]);
+  VR.trackTex.needsUpdate = true;
+}
+
+function drawBoxFace(){
+  const g = VR.boxCv.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, '#7690c0'); gr.addColorStop(1, '#43577f');
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = '#a9bce0'; g.lineWidth = 10; g.strokeRect(5, 5, 246, 246);
+  g.strokeStyle = 'rgba(169,188,224,.4)'; g.lineWidth = 6;
+  g.beginPath(); g.moveTo(20, 20); g.lineTo(236, 236); g.moveTo(236, 20); g.lineTo(20, 236); g.stroke();
+  g.fillStyle = '#26365a'; g.fillRect(40, 92, 176, 72);
+  g.fillStyle = '#e7eefb'; g.font = `700 54px ${FD}`; g.textAlign = 'center'; g.fillText(S.m + ' kg', 128, 148);
+  VR.boxTex.needsUpdate = true;
+}
+
+function drawHUDvr(){
+  const { g, tex } = VR.hud, { N, P, fsMax, fk } = params();
+  g.fillStyle = '#0f1c33'; g.fillRect(0, 0, 1024, 768);
+  g.strokeStyle = '#22385e'; g.lineWidth = 4; g.strokeRect(2, 2, 1020, 764);
+  g.textAlign = 'left'; g.font = `700 46px ${FD}`; g.fillStyle = '#e7eefb'; g.fillText('NEWTON', 36, 70);
+  g.fillStyle = '#4da3ff'; g.fillText('VR', 36 + g.measureText('NEWTON ').width, 70);
+  g.font = `500 28px ${FB}`; g.fillStyle = '#8ea3c6';
+  const lvl = S.mode === 'challenge' ? ` · Nivel ${S.level + 1} de 3` : '';
+  g.fillText($('#modeLabel').textContent + lvl + ' · ' + SURF[S.surf].name, 36, 112);
+  if (S.mode === 'challenge') {
+    const left = Math.max(0, TL - S.t);
+    g.textAlign = 'right'; g.font = `600 64px ${FM}`; g.fillStyle = left <= 5 ? '#ff5d62' : '#e7eefb';
+    g.fillText(fmt(left) + ' s', 990, 84); g.textAlign = 'left';
+  }
+  const stCol = S.sliding ? '#4da3ff' : S.F > 0 ? '#ffb020' : '#8ea3c6';
+  g.strokeStyle = stCol; g.lineWidth = 3; rrect(g, 36, 136, 952, 54, 27); g.stroke();
+  g.fillStyle = stCol; g.font = `600 26px ${FD}`; g.fillText($('#statePill').textContent, 60, 172);
+  const rows = [
+    ['F aplicada', fmt(S.F) + ' N', '#4da3ff'], [S.sliding ? 'f cinética' : 'f estática', fmt(S.f) + ' N', '#ff5d62'],
+    ['N normal', fmt(N) + ' N', '#3ddc84'], ['P = mg', fmt(P) + ' N', '#ffb020'],
+    ['F neta', fmt(S.F - S.f) + ' N', '#e7eefb'], ['a', fmt(S.a, 2) + ' m/s²', '#e7eefb'],
+    ['v', fmt(S.v, 2) + ' m/s', '#e7eefb'], ['x', fmt(S.x, 2) + ' m', '#e7eefb']
+  ];
+  rows.forEach(([k, v, c], i) => {
+    const col = i % 2, row = i >> 1, x = 36 + col*490, y = 242 + row*58;
+    g.fillStyle = c; g.fillRect(x, y - 22, 18, 18);
+    g.font = `500 30px ${FB}`; g.fillStyle = '#8ea3c6'; g.fillText(k, x + 32, y);
+    g.font = `600 34px ${FM}`; g.fillStyle = '#e7eefb'; g.textAlign = 'right'; g.fillText(v, x + 460, y); g.textAlign = 'left';
+  });
+  // barra de fuerza (gatillo)
+  const bx = 36, by = 500, bw = 952, bh = 40;
+  g.font = `600 24px ${FD}`; g.fillStyle = '#8ea3c6'; g.fillText('GATILLO = FUERZA APLICADA (0 a 150 N)', bx, by - 48);
+  g.fillStyle = '#15274a'; rrect(g, bx, by, bw, bh, 8); g.fill();
+  g.fillStyle = S.F > fsMax ? '#8cc4ff' : '#4da3ff'; rrect(g, bx, by, Math.max(1, bw * S.F / FMAX), bh, 8); g.fill();
+  [[fsMax, 'μsN'], [fk, 'μkN']].forEach(([v, t], i) => {
+    const x = bx + bw * v / FMAX;
+    g.fillStyle = '#ff5d62'; g.fillRect(x - 2, by - 6, 4, bh + 12);
+    g.font = `500 22px ${FM}`; g.textAlign = 'center'; g.fillText(t, x, i ? by + bh + 28 : by - 14); g.textAlign = 'left';
+  });
+  g.font = `500 25px ${FM}`; g.fillStyle = '#e7eefb';
+  wrap(g, $('#formula').textContent, 36, 610, 952, 34);
+  if (performance.now() - VR.flashT < 2400) {
+    g.fillStyle = 'rgba(255,93,98,.94)'; rrect(g, 36, 136, 952, 54, 27); g.fill();
+    g.fillStyle = '#0a1324'; g.font = `700 30px ${FD}`; g.textAlign = 'center';
+    g.fillText('¡SE ROMPIÓ LA FRICCIÓN ESTÁTICA!  f baja a μkN = ' + fmt(fk) + ' N', 512, 174); g.textAlign = 'left';
+  }
+  g.font = `500 23px ${FB}`; g.fillStyle = '#8ea3c6';
+  const hint = S.mode === 'explore' ? 'Gatillo: fuerza · B/Y: reiniciar · stick ←→: superficie · ↑↓: masa · clic stick: menú'
+    : 'Gatillo: fuerza · B/Y: reiniciar nivel · clic en el stick: menú';
+  g.fillText(hint, 36, 740);
+  tex.needsUpdate = true;
+}
+
+function drawGraphVR(){
+  const { g, tex } = VR.graph;
+  g.fillStyle = '#0f1c33'; g.fillRect(0, 0, 800, 660);
+  g.strokeStyle = '#22385e'; g.lineWidth = 4; g.strokeRect(2, 2, 796, 656);
+  g.font = `600 30px ${FD}`; g.fillStyle = '#8ea3c6'; g.textAlign = 'left';
+  g.fillText('FRICCIÓN vs. FUERZA APLICADA', 30, 50);
+  if (gc.width > 0) g.drawImage(gc, 20, 70, 760, 570);
+  tex.needsUpdate = true;
+}
+
+function overlayInfo(ov){
+  const txt = s => $(s).textContent;
+  if (ov === '#ovMenu') return { t:'NEWTON VR', c:'#4da3ff', l:['¿Qué fuerza necesitas para mover la caja?',
+    'Aprieta el gatillo poco a poco: más presión, más fuerza (0 a 150 N).', 'Desafío: detén la caja dentro de la zona verde. Explorar: experimenta libre.'],
+    h:'A / X: Desafío      B / Y: Explorar' };
+  if (ov === '#ovIntro') return { t:txt('#inEyebrow') + ' · ' + txt('#inTitle'), c:'#4da3ff', l:[txt('#inText'), txt('#inTip')], h:'A / X: Empezar      B / Y: Menú' };
+  if (ov === '#ovResult') {
+    const bs = $('#resActions').querySelectorAll('button');
+    return { t:txt('#resTitle'), c:$('#resTitle').classList.contains('ok') ? '#3ddc84' : '#ff5d62',
+      l:[txt('#resWhy'), `F máx. ${fmt(S.Fpeak)} N · a máx. ${fmt(S.apeak, 2)} m/s² · tiempo ${fmt(S.t)} s`, txt('#resLesson')],
+      h:`A / X: ${bs[0] ? bs[0].textContent : ''}      B / Y: ${bs[1] ? bs[1].textContent : ''}` };
+  }
+  if (ov === '#ovName') return { t:'Puntaje total: ' + txt('#nmScore'), c:'#3ddc84', l:[txt('#nmText'), 'Desde las gafas se guarda como «Visitante VR». Fuera de VR puedes escribir tu nombre.'], h:'A / X: Guardar puntaje' };
+  if (ov === '#ovBoard') {
+    const rows = memBoard.slice().sort((a, b) => b.score - a.score).slice(0, 5).map((r, i) => `${i + 1}. ${r.name} · ${r.score} pts · ${fmt(r.time)} s`);
+    return { t:'Mejores puntajes', c:'#ffb020', l:rows.length ? rows : ['Aún no hay puntajes.'], h:'A / X: Jugar otra vez      B / Y: Menú' };
+  }
+  return { t:'Cuestionario', c:'#4da3ff', l:['El cuestionario se responde fuera de las gafas, en la pantalla.'], h:'B / Y: Menú' };
+}
+
+function drawMsgVR(){
+  const ov = OVS.find(o => !$(o).hidden);
+  VR.msg.mesh.visible = !!ov;
+  if (!ov) { VR.msgSig = ''; return; }
+  const info = overlayInfo(ov), sig = JSON.stringify(info);
+  if (sig === VR.msgSig) return;
+  VR.msgSig = sig;
+  const { g, tex } = VR.msg;
+  g.clearRect(0, 0, 1400, 820);
+  g.fillStyle = 'rgba(15,28,51,.96)'; rrect(g, 4, 4, 1392, 812, 36); g.fill();
+  g.strokeStyle = info.c; g.lineWidth = 5; rrect(g, 4, 4, 1392, 812, 36); g.stroke();
+  g.textAlign = 'left'; g.fillStyle = info.c; g.font = `700 76px ${FD}`;
+  let y = wrap(g, info.t, 70, 130, 1260, 84) + 10;
+  g.fillStyle = '#e7eefb'; g.font = `400 38px ${FB}`;
+  for (const l of info.l) { y = wrap(g, l, 70, y, 1260, 50) + 14; if (y > 680) break; }
+  g.fillStyle = '#15274a'; rrect(g, 60, 700, 1280, 80, 18); g.fill();
+  g.fillStyle = '#4da3ff'; g.font = `600 40px ${FD}`; g.textAlign = 'center'; g.fillText(info.h, 700, 754);
+  tex.needsUpdate = true;
+}
+
+function renderVR(t){
+  const { N, P, fsMax } = params();
+  if (VR.lastSurf !== S.surf) { VR.lastSurf = S.surf; drawTrack(); }
+  if (VR.lastM !== S.m) { VR.lastM = S.m; drawBoxFace(); }
+  const ch = S.mode === 'challenge';
+  VR.zone.visible = VR.wall.visible = VR.metaLbl.visible = ch;
+  const side = boxSide();
+  const strain = !S.sliding && S.F > 0 ? S.F / fsMax : 0;
+  const jig = strain > .6 ? (Math.random() - .5) * strain * .012 : 0;
+  const bx = wx(S.x) + jig;
+  VR.box.scale.setScalar(side); VR.box.position.set(bx, side/2, TZ);
+  VR.shadow.position.x = bx; VR.shadow.scale.setScalar(side);
+  const k = .9 / 150, oz = TZ + side/2 + .08, oy = side/2;
+  setArrow(VR.arrows.N, bx, oy, oz, 0, 1, N*k, 'N ' + fmt(N) + ' N');
+  setArrow(VR.arrows.P, bx, oy, oz, 0, -1, P*k, 'P ' + fmt(P) + ' N');
+  setArrow(VR.arrows.F, bx, oy, oz, 1, 0, S.F*k, 'F ' + fmt(S.F) + ' N');
+  setArrow(VR.arrows.f, bx, oy - .07, oz, -1, 0, S.f*k, 'f ' + fmt(S.f) + ' N');
+  if (S.mode === 'explore' && S.x > 20 && S.v === 0 && S.F === 0) resetBox();
+  if (t - VR.t > 66) {
+    VR.t = t;
+    drawHUDvr(); drawGraphVR(); drawMsgVR();
+    const hv = S.sliding ? Math.min(.35, S.v * .12) : S.F > 0 ? .05 + .3 * S.F / fsMax : 0;
+    if (hv > .02) buzz(hv, 70);
+  }
+  VR.renderer.render(VR.scene, VR.camera);
+}
+
+resize(); goMenu(); vrSupport(); rafId = requestAnimationFrame(frame);
 })();
 </script>
 
